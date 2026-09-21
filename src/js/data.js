@@ -17,6 +17,7 @@ const seedStock = rows.map(([name, quantity, unit, categoryId, status], index) =
     name,
     quantity,
     unit,
+    increment: /^(kg|l)$/i.test(unit) ? 0.1 : /^(g|ml)$/i.test(unit) ? 50 : 1,
     categoryId,
     statuses: ["open", "frozen", "expiring", "leftover"].includes(status) ? [status] : [],
     createdAt: now - index,

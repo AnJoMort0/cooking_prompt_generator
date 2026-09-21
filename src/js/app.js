@@ -49,7 +49,7 @@ function CategoryGlyph({ category, size = 16 }) {
 function Stepper({ value, onMinus, onPlus, label }) { return h("div", { className: "stepper", "aria-label": label },
     h("button", { onClick: onMinus, "aria-label": `Decrease ${label}` },
         h(Minus, null)),
-    h("strong", null, value),
+    h("strong", null, formatQuantity(value)),
     h("button", { onClick: onPlus, "aria-label": `Increase ${label}` },
         h(Plus, null))); }
 function App() {
@@ -65,18 +65,24 @@ function App() {
     const [shoppingText, setShoppingText] = useState("");
     const [shoppingImport, setShoppingImport] = useState("");
     const [recipeDraft, setRecipeDraft] = useState("");
+    const [showRecipeImport, setShowRecipeImport] = useState(false);
+    const [selectedRecipeId, setSelectedRecipeId] = useState(null);
+    const [recipeQuery, setRecipeQuery] = useState("");
+    const [recipeAvailabilityFilter, setRecipeAvailabilityFilter] = useState("all");
+    const [recipeTagFilter, setRecipeTagFilter] = useState("all");
+    const [recipeSort, setRecipeSort] = useState("newest");
     const [tone, setTone] = useState("balanced");
     const [toast, setToast] = useState("");
     const [online, setOnline] = useState(navigator.onLine);
-    const [newItem, setNewItem] = useState({ name: "", quantity: 1, unit: "", categoryId: state.categories[0]?.id || "", statuses: [] });
+    const [newItem, setNewItem] = useState({ name: "", quantity: 1, unit: "", increment: 1, categoryId: state.categories[0]?.id || "", statuses: [] });
     const importRef = useRef(null);
     useEffect(() => saveState(state), [state]);
     useEffect(() => { const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener("online", on); window.addEventListener("offline", off); return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); }; }, []);
     const notify = (message) => { setToast(message); window.setTimeout(() => setToast(""), 1800); };
     const activity = (type, label) => ({ id: uuid(), type, label, at: Date.now() });
     const addToShopping = (name, source = "manual") => setState(current => { const existing = current.shopping.find(item => matchesName(item.name, name)); const shopping = existing ? current.shopping.map(item => item.id === existing.id ? { ...item, quantity: item.quantity + 1, addedAt: Date.now(), checked: false } : item) : [newShoppingItem(name, source), ...current.shopping]; return { ...current, shopping, analytics: bumpAnalytics(current, name, "shop"), activity: [activity("shop", `${name} added to shopping`), ...current.activity].slice(0, 100) }; });
-    const adjustStock = (id, amount) => setState(current => ({ ...current, stock: current.stock.map(item => { if (item.id !== id)
-            return item; const quantity = Math.max(0, Math.round((item.quantity + amount) * 10) / 10); return { ...item, quantity, statuses: quantity === 0 ? [] : itemStatuses(item), updatedAt: Date.now() }; }) }));
+    const adjustStock = (id, direction) => setState(current => ({ ...current, stock: current.stock.map(item => { if (item.id !== id)
+            return item; const quantity = roundQuantity(Math.max(0, Number(item.quantity) + itemIncrement(item) * direction)); return { ...item, quantity, statuses: quantity === 0 ? [] : itemStatuses(item), updatedAt: Date.now() }; }) }));
     const toggleStatus = (id, status) => setState(current => {
         const target = current.stock.find(item => item.id === id);
         const wasActive = target ? hasStatus(target, status) : false;
@@ -88,10 +94,22 @@ function App() {
         };
     });
     const adjustShopping = (id, amount) => setState(current => ({ ...current, shopping: current.shopping.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + amount) } : item) }));
-    const stockShoppingItem = (shoppingItem) => setState(current => { const existing = current.stock.find(item => matchesName(item.name, shoppingItem.name)); const stock = existing ? current.stock.map(item => item.id === existing.id ? { ...item, quantity: Math.round((item.quantity + shoppingItem.quantity) * 10) / 10, statuses: itemStatuses(item), updatedAt: Date.now() } : item) : [{ id: uuid(), name: shoppingItem.name, quantity: shoppingItem.quantity, unit: shoppingItem.unit, categoryId: inferCategory(shoppingItem.name, current.categories, current.stock), statuses: [], createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock]; return { ...current, stock, shopping: current.shopping.filter(item => item.id !== shoppingItem.id), analytics: bumpAnalytics(current, shoppingItem.name, "stock"), activity: [activity("stock", `${shoppingItem.quantity} ${shoppingItem.name} moved into stock`), ...current.activity].slice(0, 100) }; });
+    const stockShoppingItem = (shoppingItem) => setState(current => { const existing = current.stock.find(item => matchesName(item.name, shoppingItem.name)); const stock = existing ? current.stock.map(item => item.id === existing.id ? { ...item, quantity: roundQuantity(Number(item.quantity) + Number(shoppingItem.quantity)), statuses: itemStatuses(item), updatedAt: Date.now() } : item) : [{ id: uuid(), name: shoppingItem.name, quantity: shoppingItem.quantity, unit: shoppingItem.unit, increment: defaultIncrementForUnit(shoppingItem.unit), categoryId: inferCategory(shoppingItem.name, current.categories, current.stock), statuses: [], createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock]; return { ...current, stock, shopping: current.shopping.filter(item => item.id !== shoppingItem.id), analytics: bumpAnalytics(current, shoppingItem.name, "stock"), activity: [activity("stock", `${shoppingItem.quantity} ${shoppingItem.name} moved into stock`), ...current.activity].slice(0, 100) }; });
     const stockChecked = () => { const checked = state.shopping.filter(i => i.checked); checked.forEach(stockShoppingItem); notify(`${checked.length} item${checked.length === 1 ? "" : "s"} stocked`); };
-    const saveRecipe = () => { if (!recipeDraft.trim())
-        return; const recipe = { id: uuid(), title: recipeTitle(recipeDraft), text: recipeDraft.trim(), ingredients: parseRecipeIngredients(recipeDraft), createdAt: Date.now() }; setState(current => ({ ...current, recipes: [recipe, ...current.recipes], activity: [activity("recipe", `${recipe.title} saved`), ...current.activity].slice(0, 100) })); setRecipeDraft(""); notify("Recipe scanned"); };
+    const saveRecipe = () => {
+        if (!recipeDraft.trim()) return;
+        const recipes = parseRecipeBlocks(recipeDraft);
+        if (!recipes.length) { notify("No recipe found"); return; }
+        setState(current => ({
+            ...current,
+            recipes: [...recipes, ...current.recipes],
+            activity: [...recipes.map(recipe => activity("recipe", `${recipe.title} saved`)), ...current.activity].slice(0, 100)
+        }));
+        setRecipeDraft("");
+        setShowRecipeImport(false);
+        setSelectedRecipeId(recipes[0].id);
+        notify(`${recipes.length} recipe${recipes.length === 1 ? "" : "s"} imported`);
+    };
     const importShopping = () => { const names = parseShoppingText(shoppingImport); names.forEach(name => addToShopping(name, "import")); setShoppingImport(""); setShowImport(false); notify(`${names.length} item${names.length === 1 ? "" : "s"} imported`); };
     const smart = useMemo(() => smartRecommendations(state), [state]);
     const recent = useMemo(() => recentShopping(state), [state]);
@@ -102,10 +120,34 @@ function App() {
         return rank(a) - rank(b) || a.updatedAt - b.updatedAt;
     }), [state.stock]);
     const visibleStock = useMemo(() => state.stock.filter(item => (categoryFilter === "all" || categoryFilter === "unsorted" ? categoryFilter !== "unsorted" || !item.categoryId : item.categoryId === categoryFilter) && (statusFilter === "all" || (statusFilter === "out" ? item.quantity === 0 : hasStatus(item, statusFilter))) && normalise(item.name).includes(normalise(query))).sort((a, b) => (a.quantity === 0 ? 1 : 0) - (b.quantity === 0 ? 1 : 0) || a.name.localeCompare(b.name)), [state.stock, categoryFilter, statusFilter, query]);
+    const recipeTags = useMemo(() => Array.from(new Set(state.recipes.flatMap(recipe => recipe.tags || []).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [state.recipes]);
+    const visibleRecipes = useMemo(() => state.recipes.filter(recipe => {
+        const availability = recipeAvailability(recipe, state.stock);
+        if (recipeQuery && !normalise(`${recipe.title} ${recipe.cuisine || ""} ${(recipe.tags || []).join(" ")}`).includes(normalise(recipeQuery))) return false;
+        if (recipeAvailabilityFilter === "ready" && !availability.ready) return false;
+        if (recipeAvailabilityFilter === "missing" && availability.ready) return false;
+        if (recipeAvailabilityFilter === "prep" && normalise(recipe.mode) !== "prep ahead") return false;
+        if (recipeTagFilter !== "all" && !(recipe.tags || []).some(tag => normalise(tag) === normalise(recipeTagFilter))) return false;
+        return true;
+    }).sort((a, b) => {
+        if (recipeSort === "quickest") return recipeTotalMinutes(a) - recipeTotalMinutes(b) || a.title.localeCompare(b.title);
+        if (recipeSort === "match") return recipeAvailability(b, state.stock).pct - recipeAvailability(a, state.stock).pct || recipeTotalMinutes(a) - recipeTotalMinutes(b);
+        if (recipeSort === "cooked") return Number(b.timesCooked || 0) - Number(a.timesCooked || 0) || Number(b.createdAt) - Number(a.createdAt);
+        if (recipeSort === "az") return a.title.localeCompare(b.title);
+        return Number(b.createdAt) - Number(a.createdAt);
+    }), [state.recipes, state.stock, recipeQuery, recipeAvailabilityFilter, recipeTagFilter, recipeSort]);
+    const selectedRecipe = state.recipes.find(recipe => recipe.id === selectedRecipeId) || null;
     const prompt = useMemo(() => makePrompt(state, tone), [state, tone]);
     const addStock = (event) => { event.preventDefault(); if (!newItem.name.trim())
-        return; setState(current => ({ ...current, stock: [{ id: uuid(), name: newItem.name.trim(), quantity: newItem.quantity, unit: newItem.unit.trim(), categoryId: newItem.categoryId || null, statuses: newItem.quantity === 0 ? [] : itemStatuses(newItem), createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock], activity: [activity("stock", `${newItem.name.trim()} added to stock`), ...current.activity].slice(0, 100) })); setNewItem({ name: "", quantity: 1, unit: "", categoryId: state.categories[0]?.id || "", statuses: [] }); setShowAdd(false); notify("Added to stock"); };
-    const editStock = (item) => setEditingItem({ ...item, categoryId: item.categoryId || "", statuses: itemStatuses(item) });
+        return; setState(current => ({ ...current, stock: [{ id: uuid(), name: newItem.name.trim(), quantity: Math.max(0, Number(newItem.quantity) || 0), unit: newItem.unit.trim(), increment: Number(newItem.increment) > 0 ? Number(newItem.increment) : defaultIncrementForUnit(newItem.unit), categoryId: newItem.categoryId || null, statuses: Number(newItem.quantity) === 0 ? [] : itemStatuses(newItem), createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock], activity: [activity("stock", `${newItem.name.trim()} added to stock`), ...current.activity].slice(0, 100) })); setNewItem({ name: "", quantity: 1, unit: "", increment: 1, categoryId: state.categories[0]?.id || "", statuses: [] }); setShowAdd(false); notify("Added to stock"); };
+    const editStock = (item) => setEditingItem({ ...item, increment: itemIncrement(item), categoryId: item.categoryId || "", statuses: itemStatuses(item) });
+    const deleteStockItem = () => {
+        if (!editingItem || !window.confirm(`Delete ${editingItem.name} from stock? This cannot be undone.`)) return;
+        const name = editingItem.name;
+        setState(current => ({ ...current, stock: current.stock.filter(item => item.id !== editingItem.id), activity: [activity("stock", `${name} deleted`), ...current.activity].slice(0, 100) }));
+        setEditingItem(null);
+        notify("Ingredient deleted");
+    };
     const saveStockEdit = (event) => {
         event.preventDefault();
         if (!editingItem?.name.trim()) return;
@@ -140,6 +182,7 @@ function App() {
                     name: nextName,
                     quantity: nextQuantity,
                     unit: editingItem.unit.trim(),
+                    increment: Number(editingItem.increment) > 0 ? Number(editingItem.increment) : defaultIncrementForUnit(editingItem.unit),
                     categoryId: editingItem.categoryId || null,
                     statuses: nextStatuses,
                     updatedAt: Date.now()
@@ -149,6 +192,26 @@ function App() {
         });
         setEditingItem(null);
         notify("Ingredient updated");
+    };
+    const cookRecipe = (recipe) => {
+        if (!recipe || !window.confirm(`Mark “${recipe.title}” as cooked and subtract its measurable ingredients from stock?`)) return;
+        let result = null;
+        setState(current => {
+            result = consumeRecipeStock(recipe, current.stock);
+            return {
+                ...current,
+                stock: result.stock,
+                recipes: current.recipes.map(item => item.id === recipe.id ? { ...item, timesCooked: Number(item.timesCooked || 0) + 1, lastCookedAt: Date.now() } : item),
+                activity: [activity("cook", `${recipe.title} cooked`), ...current.activity].slice(0, 100)
+            };
+        });
+        window.setTimeout(() => notify(result?.skipped ? `Stock updated · ${result.consumed} measured · ${result.skipped} not measurable` : `Stock updated from ${result?.consumed || 0} ingredient${result?.consumed === 1 ? "" : "s"}`), 0);
+    };
+    const deleteRecipe = (recipe) => {
+        if (!recipe || !window.confirm(`Delete “${recipe.title}” from your recipe library?`)) return;
+        setState(current => ({ ...current, recipes: current.recipes.filter(item => item.id !== recipe.id) }));
+        setSelectedRecipeId(null);
+        notify("Recipe deleted");
     };
     const copyPrompt = async () => { try {
         if (navigator.clipboard?.writeText && window.isSecureContext) {
@@ -260,7 +323,7 @@ function App() {
                     h("button", { className: "manage-categories", onClick: () => setShowSettings(true) },
                         h(FolderCog, { size: 16 }),
                         h("span", null, "Manage"))),
-                visibleStock.length ? h("div", { className: "stock-grid" }, visibleStock.map(item => h(StockCard, { key: item.id, item: item, state: state, onAdjust: adjustStock, onStatus: toggleStatus, onShop: () => { addToShopping(item.name, "restock"); notify("Added to shopping"); }, onEdit: () => editStock(item), onDelete: () => setState(current => ({ ...current, stock: current.stock.filter(i => i.id !== item.id) })) }))) : h(Empty, { icon: h(Search, null), title: "Nothing here", text: "Try another filter or add an ingredient." })),
+                visibleStock.length ? h("div", { className: "stock-grid" }, visibleStock.map(item => h(StockCard, { key: item.id, item: item, state: state, onAdjust: adjustStock, onStatus: toggleStatus, onShop: () => { addToShopping(item.name, "restock"); notify("Added to shopping"); }, onEdit: () => editStock(item) }))) : h(Empty, { icon: h(Search, null), title: "Nothing here", text: "Try another filter or add an ingredient." })),
             tab === "shopping" && h("section", { className: "page panel-page" },
                 h("div", { className: "page-title" },
                     h("div", null,
@@ -314,21 +377,30 @@ function App() {
                                 h("b", null, item.name),
                                 h("small", null, item.reasons.join(" · "))),
                             h(Plus, null))))))),
-            tab === "recipes" && h("section", { className: "page recipes-page" },
-                h("div", { className: "recipe-import" },
-                    h("span", { className: "eyebrow" },
-                        h(BookOpen, null),
-                        " YOUR KEEPERS"),
-                    h("h1", null,
-                        "Recipe",
-                        h("br", null),
-                        "library"),
-                    h("p", null, "Paste a generated recipe or any recipe with an Ingredients heading. Mise checks it against live stock and quietly learns which ingredients matter most."),
-                    h("textarea", { value: recipeDraft, onChange: e => setRecipeDraft(e.target.value), placeholder: '=== RECIPE ===\nTITLE: Tomato pesto pasta\nINGREDIENTS:\n- [STOCK] Pasta | 100 g\n- [STOCK] Pesto sauce | 2 tbsp\n- [BUY] Garlic | 1 clove\nSTEPS:\n1. Cook...' }),
-                    h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() },
-                        h(BookOpen, null),
-                        "Save & scan")),
-                h("div", { className: "recipe-list" }, state.recipes.length ? state.recipes.map(recipe => h(RecipeCard, { key: recipe.id, recipe: recipe, state: state, onShop: name => addToShopping(name, "recipe"), onDelete: () => setState(current => ({ ...current, recipes: current.recipes.filter(r => r.id !== recipe.id) })) })) : h(Empty, { icon: h(BookOpen, null), title: "No saved recipes", text: "Paste one recipe here. Ingredient matching works locally." }))),
+            tab === "recipes" && h("section", { className: "page recipe-library-page" },
+                h("div", { className: "recipe-library-head" },
+                    h("div", null,
+                        h("span", { className: "eyebrow" }, h(BookOpen, null), " YOUR KEEPERS"),
+                        h("h1", null, "Recipe library"),
+                        h("p", null, state.recipes.length ? `${state.recipes.length} saved recipe${state.recipes.length === 1 ? "" : "s"} · availability updates with your stock` : "Save recipes as structured cards you can actually cook from.")),
+                    h("button", { className: "primary-button", onClick: () => setShowRecipeImport(true) }, h(ClipboardPaste, null), "Import recipe")),
+                h("div", { className: "recipe-toolbar" },
+                    h("label", { className: "recipe-search" }, h(Search, null), h("input", { value: recipeQuery, onChange: e => setRecipeQuery(e.target.value), placeholder: "Find recipe or tag", "aria-label": "Find recipe" }), recipeQuery && h("button", { type: "button", onClick: () => setRecipeQuery(""), "aria-label": "Clear recipe search" }, h(X, null))),
+                    h("select", { value: recipeAvailabilityFilter, onChange: e => setRecipeAvailabilityFilter(e.target.value), "aria-label": "Filter recipes by availability" },
+                        h("option", { value: "all" }, "All availability"),
+                        h("option", { value: "ready" }, "Ready now"),
+                        h("option", { value: "missing" }, "Needs shopping"),
+                        h("option", { value: "prep" }, "Prep ahead")),
+                    h("select", { value: recipeTagFilter, onChange: e => setRecipeTagFilter(e.target.value), "aria-label": "Filter recipes by tag" },
+                        h("option", { value: "all" }, "All tags"),
+                        recipeTags.map(tag => h("option", { key: tag, value: tag }, tag))),
+                    h("select", { value: recipeSort, onChange: e => setRecipeSort(e.target.value), "aria-label": "Sort recipes" },
+                        h("option", { value: "newest" }, "Newest first"),
+                        h("option", { value: "quickest" }, "Quickest first"),
+                        h("option", { value: "match" }, "Best stock match"),
+                        h("option", { value: "cooked" }, "Most cooked"),
+                        h("option", { value: "az" }, "A–Z"))),
+                h("div", { className: "recipe-list recipe-grid" }, visibleRecipes.length ? visibleRecipes.map(recipe => h(RecipeCard, { key: recipe.id, recipe, state, onOpen: () => setSelectedRecipeId(recipe.id) })) : h(Empty, { icon: h(BookOpen, null), title: state.recipes.length ? "No recipes match" : "No saved recipes", text: state.recipes.length ? "Try another filter." : "Import a generated recipe and Mise will turn it into a useful recipe card." }))),
             tab === "cook" && h("section", { className: "page cook-page" },
                 h("div", { className: "cook-intro" },
                     h("span", { className: "eyebrow" },
@@ -383,7 +455,11 @@ function App() {
                     h("input", { type: "number", min: "0", step: "0.5", value: newItem.quantity, onChange: e => setNewItem({ ...newItem, quantity: Number(e.target.value) }) })),
                 h("label", null,
                     "Unit",
-                    h("input", { value: newItem.unit, onChange: e => setNewItem({ ...newItem, unit: e.target.value }), placeholder: "pack, L, can\u2026" })),
+                    h("input", { value: newItem.unit, onChange: e => { const unit = e.target.value; setNewItem({ ...newItem, unit, increment: defaultIncrementForUnit(unit) }); }, placeholder: "pack, L, can…" })),
+                h("label", null,
+                    "+/− amount",
+                    h("input", { type: "number", min: "0.001", step: "any", value: newItem.increment, onChange: e => setNewItem({ ...newItem, increment: Number(e.target.value) }), placeholder: "1" })),
+                h("p", { className: "form-hint quantity-hint" }, "How much the card +/− buttons change each tap."),
                 h("label", { className: "full" },
                     "Category",
                     h("select", { value: newItem.categoryId, onChange: e => setNewItem({ ...newItem, categoryId: e.target.value }) },
@@ -407,6 +483,10 @@ function App() {
                 h("label", null,
                     "Unit",
                     h("input", { value: editingItem.unit, onChange: e => setEditingItem({ ...editingItem, unit: e.target.value }), placeholder: "pack, L, can…" })),
+                h("label", null,
+                    "+/− amount",
+                    h("input", { type: "number", min: "0.001", step: "any", value: editingItem.increment, onChange: e => setEditingItem({ ...editingItem, increment: Number(e.target.value) }) })),
+                h("p", { className: "form-hint quantity-hint" }, "Used by the stock card +/− buttons. Metric units are converted automatically when a recipe uses g/kg or ml/L."),
                 h("label", { className: "full" },
                     "Category",
                     h("select", { value: editingItem.categoryId || "", onChange: e => setEditingItem({ ...editingItem, categoryId: e.target.value }) },
@@ -418,7 +498,18 @@ function App() {
                 h("p", { className: "form-hint full" }, "Choose any that apply; statuses can stack. Set quantity to 0 to mark this ingredient out of stock."),
                 h("button", { className: "primary-button full", type: "submit" },
                     h(Pencil, null),
-                    "Save changes"))),
+                    "Save changes"),
+                h("div", { className: "edit-danger full" },
+                    h("button", { type: "button", className: "danger-link", onClick: deleteStockItem }, h(Trash2, null), "Delete ingredient"),
+                    h("small", null, "Deletion is kept here to avoid accidental taps on stock cards.")))),
+        showRecipeImport && h(Modal, { title: "Import recipe", onClose: () => setShowRecipeImport(false), wide: true },
+            h("div", { className: "recipe-import-modal" },
+                h("p", null, "Paste one recipe, or paste several === RECIPE === blocks at once. Mise extracts tags, timing, ingredients and steps into separate recipe cards."),
+                h("textarea", { autoFocus: true, value: recipeDraft, onChange: e => setRecipeDraft(e.target.value), placeholder: '=== RECIPE ===\nTITLE: Tomato pesto pasta\nMODE: Fast\nCUISINE: Italian\nTAGS: quick, pasta, vegetarian\nSERVINGS: 1\nACTIVE MINUTES: 10\nTOTAL MINUTES: 20\nLEAD TIME: none\nINGREDIENTS:\n- [STOCK] Pasta | 100 | g\n- [STOCK] Pesto sauce | 2 | tbsp\nSTEPS:\n1. Cook the pasta until al dente.\n2. Toss with pesto and serve.\n=== END RECIPE ===' }),
+                h("div", { className: "modal-actions" },
+                    h("button", { className: "soft-button", onClick: () => setShowRecipeImport(false) }, "Cancel"),
+                    h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
+        selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
         showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify }),
         toast && h("div", { className: "toast", role: "status", "aria-live": "polite" },
             h(Check, null),
@@ -438,7 +529,7 @@ function Empty({ icon, title, text }) { return h("div", { className: "empty" },
     icon,
     h("h3", null, title),
     h("p", null, text)); }
-function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit, onDelete }) {
+function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit }) {
     const category = state.categories.find(c => c.id === item.categoryId);
     const recipes = usageCount(item.name, state.recipes);
     const shoppingAdds = analyticsFor(state, item.name).shoppingAdds;
@@ -454,26 +545,14 @@ function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit, onDelete }
                 category?.name || "Unsorted",
                 item.quantity === 0 ? " · Out of stock" : statusText(item).length ? ` · ${statusText(item).map(label => label.replace(/^./, char => char.toUpperCase())).join(" · ")}` : "")),
         (recipes > 0 || shoppingAdds > 0) && h("div", { className: "micro-signals" },
-            recipes > 0 && h("span", null,
-                h(BookOpen, null),
-                recipes,
-                " recipe",
-                recipes === 1 ? "" : "s"),
-            shoppingAdds > 0 && h("span", null,
-                h(History, null),
-                "bought ",
-                shoppingAdds,
-                "\u00D7")),
+            recipes > 0 && h("span", null, h(BookOpen, null), recipes, " recipe", recipes === 1 ? "" : "s"),
+            shoppingAdds > 0 && h("span", null, h(History, null), "bought ", shoppingAdds, "×")),
         h("div", { className: "stock-card-bottom" },
-            h(Stepper, { value: item.quantity, label: item.name, onMinus: () => onAdjust(item.id, -1), onPlus: () => onAdjust(item.id, 1) }),
+            h(Stepper, { value: item.quantity, label: `${item.name}; changes by ${formatQuantity(itemIncrement(item))} ${item.unit || "units"}`, onMinus: () => onAdjust(item.id, -1), onPlus: () => onAdjust(item.id, 1) }),
             h("small", null, item.unit),
             h("div", { className: "card-actions" },
-                h("button", { onClick: onShop, title: "Add to shopping", "aria-label": `Add ${item.name} to shopping` },
-                    h(ShoppingBasket, null)),
-                h("button", { className: "edit-stock-button", onClick: onEdit, title: "Edit ingredient", "aria-label": `Edit ${item.name}` },
-                    h(Pencil, null)),
-                h("button", { onClick: onDelete, title: "Delete", "aria-label": `Delete ${item.name}` },
-                    h(Trash2, null)))));
+                h("button", { onClick: onShop, title: "Add to shopping", "aria-label": `Add ${item.name} to shopping` }, h(ShoppingBasket, null)),
+                h("button", { className: "edit-stock-button", onClick: onEdit, title: "Edit ingredient", "aria-label": `Edit ${item.name}` }, h(Pencil, null)))));
 }
 function ShoppingRow({ item, onCheck, onAdjust, onStock, onDelete }) { return h("article", { className: `shopping-row ${item.checked ? "checked" : ""}` },
     h("button", { className: "check-button", onClick: onCheck, "aria-label": item.checked ? `Uncheck ${item.name}` : `Check ${item.name}`, "aria-pressed": item.checked }, item.checked && h(Check, null)),
@@ -489,41 +568,63 @@ function ShoppingRow({ item, onCheck, onAdjust, onStock, onDelete }) { return h(
         "Stock"),
     h("button", { className: "icon-button delete", onClick: onDelete, "aria-label": `Delete ${item.name}` },
         h(Trash2, null))); }
-function RecipeCard({ recipe, state, onShop, onDelete }) { const availability = recipeAvailability(recipe, state.stock); const total = recipe.ingredients.length, pct = total ? Math.round(availability.matched.length / total * 100) : 0; return h("article", { className: "recipe-card" },
-    h("div", { className: "recipe-card-top" },
-        h("div", null,
-            h("span", { className: `availability ${availability.ready ? "ready" : availability.missing.length ? "missing" : "unknown"}` }, availability.ready ? h(Fragment, null,
-                h(Check, null),
-                "Available now") : availability.missing.length ? h(Fragment, null,
-                h(ShoppingBasket, null),
-                availability.missing.length,
-                " missing") : h(Fragment, null,
-                h(Search, null),
-                "Needs ingredients")),
-            h("h2", null, recipe.title)),
-        h("button", { className: "icon-button", onClick: onDelete, "aria-label": `Delete ${recipe.title}` },
-            h(Trash2, null))),
-    total > 0 && h(Fragment, null,
-        h("div", { className: "coverage" },
-            h("span", { style: { width: `${pct}%` } })),
-        h("div", { className: "ingredient-match" },
-            availability.matched.map(name => h("span", { key: name },
-                h(Check, null),
-                name,
-                h("small", null,
-                    usageCount(name, state.recipes),
-                    "\u00D7"))),
-            availability.missing.map(name => h("button", { key: name, onClick: () => onShop(name) },
-                h(Plus, null),
-                name)))),
-    h("details", null,
-        h("summary", null,
-            h(Eye, null),
-            "View recipe"),
-        h("pre", null, recipe.text)),
-    availability.missing.length > 0 && h("button", { className: "soft-button missing-all", onClick: () => availability.missing.forEach(onShop) },
-        h(ShoppingBasket, null),
-        "Add missing to shopping")); }
+function RecipeCard({ recipe, state, onOpen }) {
+    const availability = recipeAvailability(recipe, state.stock);
+    const tags = (recipe.tags || []).slice(0, 4);
+    const time = Number(recipe.totalMinutes) || Number(recipe.activeMinutes) || null;
+    const availabilityText = availability.ready ? "Ready now" : availability.missing.length ? `${availability.missing.length} missing` : availability.short.length ? `${availability.short.length} short` : "Check stock";
+    return h("button", { className: "recipe-card recipe-card-button", onClick: onOpen, "aria-label": `Open ${recipe.title}` },
+        h("div", { className: "recipe-card-top" },
+            h("span", { className: `availability ${availability.ready ? "ready" : "missing"}` }, availability.ready ? h(Check, null) : h(ShoppingBasket, null), availabilityText),
+            recipe.timesCooked ? h("span", { className: "cooked-count" }, h(Utensils, null), recipe.timesCooked, "×") : null),
+        h("h2", null, recipe.title),
+        h("div", { className: "recipe-meta" },
+            time ? h("span", null, h(Clock3, null), time, " min") : null,
+            recipe.servings ? h("span", null, h(Users, null), recipe.servings, recipe.servings === 1 ? " serving" : " servings") : null,
+            recipe.cuisine ? h("span", null, h(Globe2, null), recipe.cuisine) : null),
+        tags.length ? h("div", { className: "recipe-tags" }, tags.map(tag => h("span", { key: tag }, tag))) : null,
+        h("div", { className: "coverage", "aria-label": `${availability.pct}% of ingredients available` }, h("span", { style: { width: `${availability.pct}%` } })),
+        h("div", { className: "recipe-card-foot" },
+            h("small", null, availability.ready ? "Everything is in stock" : `${availability.matched.length}/${availability.total} ingredients ready`),
+            h(ChevronRight, null)));
+}
+
+function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
+    const availability = recipeAvailability(recipe, state.stock);
+    const tags = recipe.tags || [];
+    const missingNames = [...availability.missing, ...availability.short];
+    return h(Modal, { title: recipe.title, onClose, wide: true },
+        h("article", { className: "recipe-detail" },
+            h("div", { className: "recipe-detail-summary" },
+                h("div", { className: "recipe-detail-meta" },
+                    h("span", { className: `availability ${availability.ready ? "ready" : "missing"}` }, availability.ready ? h(Check, null) : h(ShoppingBasket, null), availability.ready ? "Ready now" : `${missingNames.length} ingredient${missingNames.length === 1 ? "" : "s"} need attention`),
+                    recipe.totalMinutes || recipe.activeMinutes ? h("span", null, h(Clock3, null), recipe.activeMinutes ? `${recipe.activeMinutes} active` : null, recipe.activeMinutes && recipe.totalMinutes ? " · " : null, recipe.totalMinutes ? `${recipe.totalMinutes} min total` : null) : null,
+                    recipe.servings ? h("span", null, h(Users, null), recipe.servings, recipe.servings === 1 ? " serving" : " servings") : null,
+                    recipe.leadTime && normalise(recipe.leadTime) !== "none" ? h("span", null, h(CalendarClock, null), recipe.leadTime, " lead time") : null,
+                    recipe.cuisine ? h("span", null, h(Globe2, null), recipe.cuisine) : null),
+                tags.length ? h("div", { className: "recipe-tags" }, tags.map(tag => h("span", { key: tag }, tag))) : null),
+            h("div", { className: "recipe-detail-grid" },
+                h("section", { className: "recipe-ingredients" },
+                    h("div", { className: "recipe-section-title" }, h(ListChecks, null), h("h3", null, "Ingredients")),
+                    h("div", { className: "ingredient-list" }, availability.entries.map((entry, index) => {
+                        const ingredient = entry.ingredient;
+                        const stateIcon = entry.state === "available" ? h(Check, null) : entry.state === "short" ? h(TriangleAlert, null) : h(ShoppingBasket, null);
+                        const stockNote = entry.item ? `${formatQuantity(entry.item.quantity)}${entry.item.unit ? ` ${entry.item.unit}` : ""} in stock` : "Not in stock";
+                        return h("div", { className: `ingredient-row ${entry.state}`, key: `${ingredient.name}-${index}` },
+                            h("span", { className: "ingredient-state" }, stateIcon),
+                            h("div", null, h("b", null, ingredient.name), h("small", null, stockNote)),
+                            h("strong", null, amountLabel(ingredient) || "as needed"),
+                            entry.state !== "available" ? h("button", { className: "ingredient-shop", onClick: () => onShop(ingredient.name), title: "Add to shopping", "aria-label": `Add ${ingredient.name} to shopping` }, h(Plus, null)) : null);
+                    }))),
+                h("section", { className: "recipe-method" },
+                    h("div", { className: "recipe-section-title" }, h(ListOrdered, null), h("h3", null, "Method")),
+                    recipe.steps?.length ? h("div", { className: "recipe-steps" }, recipe.steps.map((step, index) => h("div", { className: "recipe-step", key: index }, h("span", null, index + 1), h("p", null, step)))) : h("div", { className: "recipe-legacy-text" }, h("p", null, "This older recipe did not include structured steps."), recipe.text ? h("pre", null, recipe.text) : null))),
+            h("div", { className: "recipe-detail-actions" },
+                missingNames.length ? h("button", { className: "soft-button", onClick: () => missingNames.forEach(onShop) }, h(ShoppingBasket, null), "Add missing to shopping") : null,
+                h("button", { className: "primary-button cooked-button", onClick: onCook }, h(Check, null), "I did this")),
+            h("div", { className: "recipe-history" }, recipe.lastCookedAt ? `Cooked ${recipe.timesCooked || 1}× · last ${timeLabel(recipe.lastCookedAt)}` : "Not cooked yet in Mise"),
+            h("div", { className: "recipe-danger" }, h("button", { className: "danger-link", onClick: onDelete }, h(Trash2, null), "Delete recipe"))));
+}
 function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify }) {
     const [name, setName] = useState("");
     const [color, setColor] = useState(palette[0]);
