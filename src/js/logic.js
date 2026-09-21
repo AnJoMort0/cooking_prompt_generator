@@ -620,6 +620,10 @@ function migrateLegacyStatuses(state) {
    matching records update, new records are added, and receiver-only records stay. */
 const TRANSFER_PARAM = "mise-transfer";
 const TRANSFER_FALLBACK_URL = "https://anjomort0.github.io/cooking_prompt_generator/";
+/* Keep QR/link transfers deliberately conservative. QR capacity and link handling
+   vary a lot between camera apps, messengers and browsers; a transfer file is
+   the reliable path once a snapshot grows beyond this. */
+const TRANSFER_LINK_MAX_CHARS = 1800;
 
 function bytesToBase64Url(bytes) {
     let binary = "";
@@ -664,10 +668,32 @@ function transferBaseUrl() {
     catch { }
     return TRANSFER_FALLBACK_URL;
 }
-async function makeTransferLink(state) {
-    const payload = { kind: "mise-transfer", version: 1, createdAt: Date.now(), state: migrateLegacyStatuses(state) };
-    const encoded = await compressTransferText(JSON.stringify(payload));
-    return `${transferBaseUrl()}#${TRANSFER_PARAM}=${encoded}`;
+function makeTransferPayload(state) {
+    return { kind: "mise-transfer", version: 1, createdAt: Date.now(), state: migrateLegacyStatuses(state) };
+}
+function validateTransferPayload(payload) {
+    if (payload?.kind !== "mise-transfer" || payload.version !== 1 || !payload.state || !Array.isArray(payload.state.stock) || !Array.isArray(payload.state.categories)) throw new Error("Invalid Mise transfer data");
+    return { ...payload, state: migrateLegacyStatuses(payload.state) };
+}
+async function makeTransferBundle(state) {
+    const payload = makeTransferPayload(state);
+    const fileText = JSON.stringify(payload);
+    const encoded = await compressTransferText(fileText);
+    const link = `${transferBaseUrl()}#${TRANSFER_PARAM}=${encoded}`;
+    return {
+        payload,
+        fileText,
+        link,
+        linkSafe: link.length <= TRANSFER_LINK_MAX_CHARS,
+        linkLength: link.length,
+        fileBytes: new TextEncoder().encode(fileText).length
+    };
+}
+async function makeTransferLink(state) { return (await makeTransferBundle(state)).link; }
+function transferFileName(date = new Date()) { return `mise-transfer-${date.toISOString().slice(0, 10)}.mise`; }
+async function decodeTransferFile(file) {
+    if (!file || typeof file.text !== "function") throw new Error("Invalid Mise transfer file");
+    return validateTransferPayload(JSON.parse(await file.text()));
 }
 function transferTokenFromLocation() {
     try { return new URLSearchParams(String(location.hash || "").replace(/^#/, "")).get(TRANSFER_PARAM) || ""; }
@@ -677,9 +703,7 @@ function clearTransferHash() {
     try { const url = new URL(location.href); url.hash = ""; history.replaceState(null, "", url.href); } catch { }
 }
 async function decodeTransferLinkToken(token) {
-    const payload = JSON.parse(await decompressTransferText(token));
-    if (payload?.kind !== "mise-transfer" || payload.version !== 1 || !payload.state || !Array.isArray(payload.state.stock) || !Array.isArray(payload.state.categories)) throw new Error("Invalid Mise transfer data");
-    return { ...payload, state: migrateLegacyStatuses(payload.state) };
+    return validateTransferPayload(JSON.parse(await decompressTransferText(token)));
 }
 function mergeAnalytics(current = {}, incoming = {}) {
     const result = { ...current };

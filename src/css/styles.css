@@ -1195,6 +1195,16 @@ button svg.lucide{pointer-events:none}
 .transfer-link-field textarea{width:100%;resize:none;border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px;color:#545950;font:500 .7rem/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:none;letter-spacing:0;overflow-wrap:anywhere}
 .transfer-actions{display:flex;gap:8px;flex-wrap:wrap}
 .transfer-actions button{flex:1;min-width:120px}
+.transfer-too-large{display:flex;align-items:flex-start;gap:11px;border:1px solid #efd4c8;border-radius:16px;background:#fff3ee;padding:14px;color:#8f3d27}
+.transfer-too-large>.ui-icon{flex:0 0 auto;margin-top:2px;--icon-size:19px}
+.transfer-too-large b{display:block;margin-bottom:4px;color:#7b2f20;font-size:.9rem}
+.transfer-too-large p{margin:0;color:#80594e;font-size:.78rem;line-height:1.5}
+.transfer-file-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.transfer-file-actions button{min-width:0}
+.transfer-receive{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin-top:2px;border-top:1px solid var(--line);padding-top:12px}
+.transfer-receive b{display:block;margin-bottom:2px;font-size:.82rem}
+.transfer-receive p{margin:0;color:var(--muted);font-size:.72rem;line-height:1.45}
+.transfer-receive button{white-space:nowrap}
 .transfer-import{display:grid;grid-template-columns:auto 1fr;gap:16px 14px;align-items:start}
 .transfer-import-icon{display:grid;width:52px;height:52px;place-items:center;border-radius:15px;background:#fff0eb;color:var(--paprika)}
 .transfer-import-icon .ui-icon{--icon-size:25px}
@@ -1206,6 +1216,9 @@ button svg.lucide{pointer-events:none}
   .transfer-layout{grid-template-columns:1fr;gap:18px}
   .transfer-code-panel{padding:12px}
   .qr-shell{min-height:240px;padding:12px}
+  .transfer-file-actions{grid-template-columns:1fr}
+  .transfer-receive{grid-template-columns:1fr}
+  .transfer-receive button{width:100%}
   .transfer-counts{grid-template-columns:1fr 1fr}
   .transfer-import{grid-template-columns:44px 1fr;gap:12px}
   .transfer-import-icon{width:44px;height:44px;border-radius:13px}

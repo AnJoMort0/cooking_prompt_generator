@@ -575,7 +575,7 @@ function App() {
                     h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
         selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
         showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); } }),
-        showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify }),
+        showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify, onReceive: payload => { setShowTransfer(false); setIncomingTransfer(payload); } }),
         incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onMerge: () => mergeIncomingTransfer(incomingTransfer), onClose: dismissIncomingTransfer }),
         toast && h("div", { className: "toast", role: "status", "aria-live": "polite" },
             h(Check, null),
@@ -692,58 +692,112 @@ function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
             h("div", { className: "recipe-history" }, recipe.lastCookedAt ? `Cooked ${recipe.timesCooked || 1}× · last ${timeLabel(recipe.lastCookedAt)}` : "Not cooked yet in Mise"),
             h("div", { className: "recipe-danger" }, h("button", { className: "danger-link", onClick: onDelete }, h(Trash2, null), "Delete recipe"))));
 }
-function TransferModal({ state, onClose, notify }) {
-    const [link, setLink] = useState("");
+function TransferModal({ state, onClose, notify, onReceive }) {
+    const [bundle, setBundle] = useState(null);
     const [error, setError] = useState("");
     const [qrError, setQrError] = useState("");
     const qrRef = useRef(null);
+    const fileRef = useRef(null);
     useEffect(() => {
         let cancelled = false;
-        makeTransferLink(state).then(value => { if (!cancelled) setLink(value); }).catch(() => { if (!cancelled) setError("Could not create a transfer link on this browser."); });
+        makeTransferBundle(state).then(value => { if (!cancelled) setBundle(value); }).catch(() => { if (!cancelled) setError("Could not prepare this transfer on this browser."); });
         return () => { cancelled = true; };
     }, [state]);
     useEffect(() => {
-        if (!link || !qrRef.current) return;
+        if (!bundle?.linkSafe || !bundle.link || !qrRef.current) return;
         qrRef.current.replaceChildren();
         setQrError("");
         try {
             if (typeof QRCode !== "function") throw new Error("QR library unavailable");
-            new QRCode(qrRef.current, { text: link, width: 232, height: 232, colorDark: "#1d211c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+            new QRCode(qrRef.current, { text: bundle.link, width: 232, height: 232, colorDark: "#1d211c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.L });
         }
-        catch { setQrError("This transfer is too large for one QR code. Copy or share the link instead."); }
-    }, [link]);
+        catch { setQrError("QR creation failed on this browser. Use the transfer file instead."); }
+    }, [bundle?.link, bundle?.linkSafe]);
     const copyLink = async () => {
-        if (!link) return;
-        try { await navigator.clipboard.writeText(link); notify("Transfer link copied"); }
-        catch { window.prompt("Copy this transfer link:", link); }
+        if (!bundle?.linkSafe) return;
+        try { await navigator.clipboard.writeText(bundle.link); notify("Transfer link copied"); }
+        catch { window.prompt("Copy this transfer link:", bundle.link); }
     };
     const shareLink = async () => {
-        if (!link) return;
-        if (navigator.share) { try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this Mise kitchen data into another device.", url: link }); return; } catch { } }
+        if (!bundle?.linkSafe) return;
+        if (navigator.share) {
+            try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this Mise kitchen data into another device.", url: bundle.link }); return; }
+            catch (err) { if (err?.name === "AbortError") return; }
+        }
         copyLink();
     };
-    return h(Modal, { title: "Transfer your Mise data", onClose, wide: true },
+    const downloadFile = () => {
+        if (!bundle?.fileText) return;
+        const blob = new Blob([bundle.fileText], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = transferFileName();
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 500);
+        notify("Transfer file downloaded");
+    };
+    const shareFile = async () => {
+        if (!bundle?.fileText) return;
+        try {
+            const file = new File([bundle.fileText], transferFileName(), { type: "application/json" });
+            if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+                try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this snapshot into Mise on the other device.", files: [file] }); return; }
+                catch (err) { if (err?.name === "AbortError") return; }
+            }
+        }
+        catch { }
+        downloadFile();
+    };
+    const receiveFile = async (event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (!file) return;
+        try {
+            const payload = await decodeTransferFile(file);
+            onReceive(payload);
+        }
+        catch { notify("That Mise transfer file is not valid"); }
+    };
+    const fileSize = bundle?.fileBytes ? `${Math.max(1, Math.round(bundle.fileBytes / 1024))} KB` : "";
+    return h(Modal, { title: "Transfer between devices", onClose, wide: true },
         h("div", { className: "transfer-layout" },
             h("section", { className: "transfer-explainer" },
                 h("span", { className: "eyebrow" }, h(Smartphone, null), " DEVICE TO DEVICE"),
-                h("h3", null, "Scan on the other device"),
-                h("p", null, "The receiving device merges this snapshot into what it already has. Same ingredient, recipe, shopping item or category names are updated; new ones are added; receiver-only data is never deleted."),
+                h("h3", null, "Merge, don't replace"),
+                h("p", null, "The other device keeps anything that only exists there. Matching ingredient, recipe, shopping-item and category names are updated; new records are added."),
                 h("div", { className: "transfer-counts" },
                     h("span", null, h(Box, null), h("b", null, state.stock.length), " ingredients"),
                     h("span", null, h(BookOpen, null), h("b", null, state.recipes.length), " recipes"),
                     h("span", null, h(Tags, null), h("b", null, state.categories.length), " categories"),
                     h("span", null, h(ShoppingBasket, null), h("b", null, state.shopping.length), " shopping")),
-                h("div", { className: "transfer-privacy" }, h(ShieldCheck, null), h("p", null, "The data is encoded after the # in the link, so it is not sent to GitHub Pages. Anyone you give the link to can read the snapshot, so share it only with devices you trust."))),
+                h("div", { className: "transfer-privacy" }, h(ShieldCheck, null), h("p", null, "For small snapshots, QR/link data stays after the # in the URL and is not sent to GitHub Pages. Larger snapshots use a local transfer file that only leaves this device when you share it."))),
             h("section", { className: "transfer-code-panel" },
-                !link && !error ? h("div", { className: "transfer-loading" }, h(QrCode, null), "Building transfer…") : null,
+                !bundle && !error ? h("div", { className: "transfer-loading" }, h(QrCode, null), "Preparing transfer…") : null,
                 error ? h("div", { className: "transfer-error" }, h(TriangleAlert, null), error) : null,
-                link ? h(Fragment, null,
-                    h("div", { className: `qr-shell ${qrError ? "qr-unavailable" : ""}` }, h("div", { ref: qrRef, className: "qr-code", "aria-label": "Mise transfer QR code" }), qrError ? h("p", null, qrError) : null),
-                    h("label", { className: "transfer-link-field" }, h("span", null, "Transfer link"), h("textarea", { value: link, readOnly: true, rows: 3, onFocus: event => event.target.select() })),
-                    h("div", { className: "transfer-actions" },
-                        h("button", { className: "primary-button", onClick: copyLink }, h(Copy, null), "Copy link"),
-                        h("button", { className: "soft-button", onClick: shareLink }, h(Share2, null), "Share"))) : null)));
+                bundle ? h(Fragment, null,
+                    bundle.linkSafe ? h(Fragment, null,
+                        h("div", { className: `qr-shell ${qrError ? "qr-unavailable" : ""}` }, h("div", { ref: qrRef, className: "qr-code", "aria-label": "Mise transfer QR code" }), qrError ? h("p", null, qrError) : null),
+                        h("label", { className: "transfer-link-field" }, h("span", null, "Transfer link"), h("textarea", { value: bundle.link, readOnly: true, rows: 3, onFocus: event => event.target.select() })),
+                        h("div", { className: "transfer-actions" },
+                            h("button", { className: "primary-button", onClick: copyLink }, h(Copy, null), "Copy link"),
+                            h("button", { className: "soft-button", onClick: shareLink }, h(Share2, null), "Share link"))) :
+                        h("div", { className: "transfer-too-large" },
+                            h(TriangleAlert, null),
+                            h("div", null,
+                                h("b", null, "Too much data for a reliable QR/link"),
+                                h("p", null, `This snapshot is ${fileSize}. Embedding the whole kitchen in a URL would be easy for camera apps, messengers or browsers to truncate. Use the transfer file instead.`))),
+                    h("div", { className: "transfer-file-actions" },
+                        h("button", { className: bundle.linkSafe ? "soft-button" : "primary-button", onClick: shareFile }, h(Share2, null), "Share transfer file"),
+                        h("button", { className: "soft-button", onClick: downloadFile }, h(HardDriveDownload, null), "Download transfer file")),
+                    h("div", { className: "transfer-receive" },
+                        h("div", null, h("b", null, "Receiving on this device?"), h("p", null, "Choose a .mise transfer file. Mise will show the merge summary before changing anything.")),
+                        h("button", { className: "soft-button", onClick: () => fileRef.current?.click() }, h(Upload, null), "Import transfer file"),
+                        h("input", { ref: fileRef, hidden: true, type: "file", accept: ".mise,application/json,.json", onChange: receiveFile }))) : null)));
 }
+
 function TransferImportModal({ payload, onMerge, onClose }) {
     const incoming = payload.state;
     const created = payload.createdAt ? new Date(payload.createdAt).toLocaleString() : "another device";
@@ -803,11 +857,11 @@ function SettingsModal({ state, setState, onClose, exportData, importRef, restor
                     h(ShieldCheck, null),
                     " YOUR DATA"),
                 h("h3", null, "Private by design"),
-                h("p", null, "Everything lives in this browser. Export a backup before clearing browser data or changing devices."),
+                h("p", null, "Everything lives in this browser. Transfer data to another device by QR when it is small, or by a merge-safe Mise transfer file when it is larger."),
                 h("div", { className: "data-actions" },
                     h("button", { className: "soft-button transfer-button", onClick: onTransfer },
                         h(QrCode, null),
-                        "Generate QR / transfer link"),
+                        "Transfer between devices"),
                     h("button", { className: "soft-button", onClick: exportData },
                         h(HardDriveDownload, null),
                         "Download backup"),
