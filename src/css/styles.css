@@ -847,3 +847,76 @@ button svg.lucide{pointer-events:none}
   /* On phones labels would crowd four compact state buttons; icons carry the state. */
   .filter-button>span:not(.ui-icon){display:none!important}
 }
+
+/* --------------------------------------------------------------------------
+   Input responsiveness + category icon chooser
+   -------------------------------------------------------------------------- */
+.search{
+  position:relative;
+  padding-right:7px;
+}
+.search input{
+  flex:1 1 auto;
+  min-width:0;
+}
+.search-clear{
+  display:grid;
+  flex:0 0 auto;
+  width:28px;
+  height:28px;
+  place-items:center;
+  border-radius:999px;
+  background:#f0eee8;
+  color:#70746b;
+}
+.search-clear:hover{background:#e5e2da;color:var(--ink)}
+.search-clear .ui-icon{--icon-size:14px}
+
+.category-option-label{
+  margin-top:2px;
+  color:#686c63;
+  font-size:.68rem;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.category-icon-picker{
+  display:grid;
+  grid-template-columns:repeat(5,minmax(0,1fr));
+  gap:7px;
+}
+.category-icon-picker button{
+  display:grid;
+  min-width:0;
+  min-height:58px;
+  place-items:center;
+  gap:4px;
+  border:1px solid var(--line);
+  border-radius:12px;
+  background:#fff;
+  padding:7px 4px;
+  color:#666a61;
+}
+.category-icon-picker button:hover{background:#f7f5f0;color:var(--ink)}
+.category-icon-picker button.active{
+  border-color:var(--ink);
+  background:var(--ink);
+  color:#fff;
+  box-shadow:0 0 0 2px rgb(32 35 30/8%);
+}
+.category-icon-picker .ui-icon{--icon-size:18px}
+.category-icon-picker span:not(.ui-icon){
+  max-width:100%;
+  overflow:hidden;
+  font-size:.62rem;
+  font-weight:800;
+  line-height:1.05;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+
+@media(max-width:620px){
+  .search-clear{width:30px;height:30px}
+  .category-icon-picker{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+  .category-icon-picker button{min-height:54px;border-radius:11px}
+}

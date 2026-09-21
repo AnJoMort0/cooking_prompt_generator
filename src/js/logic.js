@@ -83,7 +83,12 @@ function inferCategory(name, categories, stock) {
     return null;
 }
 function makePrompt(state, tone) {
-    const available = state.stock.filter(i => i.quantity > 0 && i.status !== "out").map(i => { const status = i.status === "expiring" ? "near expiry" : i.status; return `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""}${status !== "ready" ? `, ${status}` : ""})`; }).join(", ");
+    const categoryById = Object.fromEntries(state.categories.map(category => [category.id, category.name]));
+    const available = state.stock.filter(i => i.quantity > 0 && i.status !== "out").map(i => {
+        const status = i.status === "expiring" ? "near expiry" : i.status;
+        const category = i.categoryId ? categoryById[i.categoryId] : "";
+        return `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""}${category ? `, ${category}` : ""}${status !== "ready" ? `, ${status}` : ""})`;
+    }).join(", ");
     const favourites = topRecipeItems(state).map(x => `${x.item.name} (${x.count} saved recipes)`).join(", ") || "No history yet";
     return `Act as my practical, inventive home cook. Use my real stock and return four clearly different recipes I could cook now, plus one PREP AHEAD recipe when the stock genuinely supports it. The prep-ahead recipe is intentionally allowed to be for tomorrow or later rather than tonight.
 
@@ -111,7 +116,7 @@ OPTIONS FOR NOW
 PREP AHEAD
 5. PREP AHEAD — include this when worthwhile. Suggest something I can start now but deliberately finish tomorrow or later because long inactive time improves it: for example a 4–48 hour marinade, overnight brine/soak/proof, slow ferment/pickle, cured preparation, or another long-resting technique. Prefer stock that is open, near expiry, or otherwise likely to benefit from being used soon. Make it tempting enough that, while choosing tonight's meal, I might save this recipe for the next day. Clearly separate WHAT TO DO NOW from HOW TO FINISH LATER. Give refrigeration/storage instructions and conservative food-safety timing; never suggest leaving raw meat, fish, dairy, or other perishable food at room temperature for a long rest. If no sensible long-prep recipe fits the stock, say PREP AHEAD: SKIP rather than forcing one.
 
-For every proposed recipe include cuisine, active/total time, exact amounts, substitutions, heat levels and visual doneness cues. Prioritise open and near-expiry items. Flag thawing. Never assume an unlisted ingredient is available.
+For every proposed recipe include cuisine, active/total time, exact amounts, substitutions, heat levels and visual doneness cues. Prioritise open and near-expiry items first. Also treat genuinely fresh produce as use-soon by default even when it is not tagged with urgency: vegetables, leafy greens, mushrooms, fresh fruit, fresh herbs and similar short-lived ingredients should generally be used before shelf-stable pantry goods. A status of ready does not mean a fresh ingredient is long-lasting. Flag thawing. Never assume an unlisted ingredient is available.
 
 Use this exact machine-readable format for every recipe you do provide:
 === RECIPE ===

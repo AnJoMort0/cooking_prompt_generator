@@ -10,8 +10,28 @@ function Modal({ title, onClose, children, wide = false }) {
             children));
 }
 /* Category icons stay semantic rather than using coloured circles alone. */
+const categoryIconChoices = [
+    { id: "", label: "Auto", Icon: Tags },
+    { id: "apple", label: "Produce", Icon: Apple },
+    { id: "carrot", label: "Veg", Icon: Carrot },
+    { id: "beef", label: "Protein", Icon: Beef },
+    { id: "milk", label: "Dairy", Icon: Milk },
+    { id: "package", label: "Pantry", Icon: Package },
+    { id: "sprout", label: "Herbs", Icon: Sprout },
+    { id: "cup-soda", label: "Drinks", Icon: CupSoda },
+    { id: "candy", label: "Sweets", Icon: Candy },
+    { id: "cookie", label: "Baking", Icon: Cookie },
+    { id: "cake-slice", label: "Dessert", Icon: CakeSlice },
+    { id: "coffee", label: "Hot drinks", Icon: Coffee },
+    { id: "sandwich", label: "Meals", Icon: Sandwich },
+    { id: "wheat", label: "Grains", Icon: Wheat }
+];
+const categoryIconMap = Object.fromEntries(categoryIconChoices.filter(choice => choice.id).map(choice => [choice.id, choice.Icon]));
 function categoryIconFor(category) {
+    if (category?.icon && categoryIconMap[category.icon]) return categoryIconMap[category.icon];
     const key = normalise(`${category?.id || ""} ${category?.name || ""}`);
+    if (/sweet|chocolate|dessert|candy|confection/.test(key)) return Candy;
+    if (/bake|biscuit|cookie|pastry|cake/.test(key)) return Cookie;
     if (/produce|fruit|vegetable|veg|fresh/.test(key)) return Apple;
     if (/protein|meat|fish|seafood/.test(key)) return Beef;
     if (/dairy|milk|cheese/.test(key)) return Milk;
@@ -208,9 +228,10 @@ function App() {
                                 state.stock.filter(i => i.quantity > 0).length,
                                 " in"))),
                     h("div", { className: "toolbar" },
-                        h("label", { className: "search" },
+                        h("div", { className: "search", role: "search" },
                             h(Search, null),
-                            h("input", { value: query, onChange: e => setQuery(e.target.value), placeholder: "Find ingredient" })),
+                            h("input", { value: query, onChange: e => setQuery(e.target.value), placeholder: "Find ingredient", "aria-label": "Find ingredient" }),
+                            query && h("button", { type: "button", className: "search-clear", onClick: () => setQuery(""), "aria-label": "Clear search", title: "Clear search" }, h(X, null))),
                         ["open", "frozen", "expiring", "out"].map(status => h("button", { className: `filter-button ${statusFilter === status ? "active" : ""}`, key: status, onClick: () => setStatusFilter(statusFilter === status ? "all" : status), title: status === "expiring" ? "Near expiry" : status, "aria-label": status === "expiring" ? "Near expiry" : status },
                             status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : status === "expiring" ? h(CalendarClock, null) : h(X, null),
                             h("span", null, status === "expiring" ? "Near expiry" : status))))),
@@ -493,8 +514,9 @@ function RecipeCard({ recipe, state, onShop, onDelete }) { const availability = 
 function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify }) {
     const [name, setName] = useState("");
     const [color, setColor] = useState(palette[0]);
+    const [icon, setIcon] = useState("");
     const addCategory = (event) => { event.preventDefault(); if (!name.trim())
-        return; const category = { id: uuid(), name: name.trim(), color, createdAt: Date.now() }; setState(current => ({ ...current, categories: [...current.categories, category], activity: [{ id: uuid(), type: "category", label: `${category.name} category added`, at: Date.now() }, ...current.activity].slice(0, 100) })); setName(""); notify("Category added"); };
+        return; const category = { id: uuid(), name: name.trim(), color, icon: icon || null, createdAt: Date.now() }; setState(current => ({ ...current, categories: [...current.categories, category], activity: [{ id: uuid(), type: "category", label: `${category.name} category added`, at: Date.now() }, ...current.activity].slice(0, 100) })); setName(""); setIcon(""); notify("Category added"); };
     const removeCategory = (id) => setState(current => ({ ...current, categories: current.categories.filter(c => c.id !== id), stock: current.stock.map(item => item.categoryId === id ? { ...item, categoryId: null, updatedAt: Date.now() } : item), activity: [{ id: uuid(), type: "category", label: "Category removed; its items are now unsorted", at: Date.now() }, ...current.activity].slice(0, 100) }));
     return h(Modal, { title: "Local settings", onClose: onClose, wide: true },
         h("div", { className: "settings-grid" },
@@ -514,6 +536,11 @@ function SettingsModal({ state, setState, onClose, exportData, importRef, restor
                         h(Trash2, null))))),
                 h("form", { className: "category-form", onSubmit: addCategory },
                     h("input", { value: name, onChange: e => setName(e.target.value), placeholder: "New category" }),
+                    h("div", { className: "category-option-label" }, "Icon"),
+                    h("div", { className: "category-icon-picker", role: "group", "aria-label": "Category icon" }, categoryIconChoices.map(choice => h("button", { type: "button", key: choice.id || "auto", onClick: () => setIcon(choice.id), className: icon === choice.id ? "active" : "", title: choice.label, "aria-label": `${choice.label} icon`, "aria-pressed": icon === choice.id },
+                        h(choice.Icon, null),
+                        h("span", null, choice.label)))),
+                    h("div", { className: "category-option-label" }, "Colour"),
                     h("div", { className: "color-picker" }, palette.map(choice => h("button", { type: "button", key: choice, onClick: () => setColor(choice), className: color === choice ? "active" : "", style: { background: choice }, "aria-label": `Use ${choice}` }))),
                     h("button", { className: "primary-button", type: "submit" },
                         h(Plus, null),

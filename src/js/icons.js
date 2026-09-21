@@ -11,6 +11,7 @@ function makeIcon(lucideName) {
         return h("span", {
             className,
             style,
+            "data-icon-name": lucideName,
             "aria-hidden": props["aria-label"] ? undefined : "true",
             "aria-label": props["aria-label"],
             role: props["aria-label"] ? "img" : undefined
@@ -24,6 +25,8 @@ function makeIcon(lucideName) {
 function refreshLucideIcons() {
     try {
         if (!globalThis.lucide?.createIcons || !globalThis.lucide?.icons) return;
+        /* Avoid rescanning/replacing every icon after state-only renders. */
+        if (!document.querySelector("i[data-lucide]")) return;
         globalThis.lucide.createIcons({
             icons: globalThis.lucide.icons,
             attrs: {
@@ -49,6 +52,8 @@ const Bot = makeIcon("bot");
 const Box = makeIcon("box");
 const Boxes = makeIcon("boxes");
 const CalendarClock = makeIcon("calendar-clock");
+const CakeSlice = makeIcon("cake-slice");
+const Candy = makeIcon("candy");
 const ChefHat = makeIcon("chef-hat");
 const Check = makeIcon("check");
 const ChevronRight = makeIcon("chevron-right");
@@ -58,7 +63,10 @@ const Clipboard = makeIcon("clipboard");
 const ClipboardPaste = makeIcon("clipboard-paste");
 const CloudOff = makeIcon("cloud-off");
 const CookingPot = makeIcon("cooking-pot");
+const Coffee = makeIcon("coffee");
+const Cookie = makeIcon("cookie");
 const CupSoda = makeIcon("cup-soda");
+const Carrot = makeIcon("carrot");
 const Download = makeIcon("download");
 const Eye = makeIcon("eye");
 const Flame = makeIcon("flame");
@@ -82,6 +90,7 @@ const Search = makeIcon("search");
 const Settings = makeIcon("settings");
 const ShieldCheck = makeIcon("shield-check");
 const ShoppingBasket = makeIcon("shopping-basket");
+const Sandwich = makeIcon("sandwich");
 const Snowflake = makeIcon("snowflake");
 const Soup = makeIcon("soup");
 const Sparkles = makeIcon("sparkles");
@@ -89,6 +98,7 @@ const Sprout = makeIcon("sprout");
 const Tags = makeIcon("tags");
 const Trash2 = makeIcon("trash-2");
 const Upload = makeIcon("upload");
+const Wheat = makeIcon("wheat");
 const Wifi = makeIcon("wifi");
 const WifiOff = makeIcon("wifi-off");
 const X = makeIcon("x");
