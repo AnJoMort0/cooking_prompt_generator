@@ -667,7 +667,7 @@ button svg.lucide{pointer-events:none}
   .toolbar{
     display:grid;
     width:100%;
-    grid-template-columns:repeat(4,40px);
+    grid-template-columns:repeat(5,40px);
     justify-content:start;
     gap:7px;
   }
@@ -919,4 +919,16 @@ button svg.lucide{pointer-events:none}
   .search-clear{width:30px;height:30px}
   .category-icon-picker{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
   .category-icon-picker button{min-height:54px;border-radius:11px}
+}
+
+
+/* Multi-status stock flags: independent toggles can be active together. */
+.status-actions button.active.leftover{background:#ece7fb;color:#6249a8}
+.status-picker button.active.frozen{border-color:#5f91c9;background:#edf5ff;color:#286a9d}
+.status-picker button.active.open{border-color:#c3903f;background:#fff5df;color:#8a5200}
+.status-picker button.active.expiring{border-color:#d15336;background:#fff0eb;color:#a33d27}
+.status-picker button.active.leftover{border-color:#7b6bd1;background:#f3efff;color:#5b47a2}
+@media(max-width:620px){
+  .status-actions button{width:22px}
+  .status-actions .ui-icon{--icon-size:12px}
 }

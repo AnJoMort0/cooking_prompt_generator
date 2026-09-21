@@ -98,6 +98,7 @@ const Sprout = makeIcon("sprout");
 const Tags = makeIcon("tags");
 const Trash2 = makeIcon("trash-2");
 const Upload = makeIcon("upload");
+const Utensils = makeIcon("utensils");
 const Wheat = makeIcon("wheat");
 const Wifi = makeIcon("wifi");
 const WifiOff = makeIcon("wifi-off");
