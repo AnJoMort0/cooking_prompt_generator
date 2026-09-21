@@ -1240,3 +1240,44 @@ button svg.lucide{pointer-events:none}
   .copy-prompt-floating{right:14px;bottom:86px;padding:10px 12px}
   .copy-prompt-floating span:last-child{display:none}
 }
+
+
+/* v18 mobile polish + help/prompt defaults */
+.ui-icon{overflow:visible}
+.ui-icon>svg.lucide{overflow:visible}
+.help-button{white-space:nowrap}
+.help-guide{display:grid;gap:16px}
+.help-lead{margin:0;color:var(--muted);line-height:1.6}
+.help-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.help-steps section{border:1px solid var(--line);border-radius:18px;background:#faf9f5;padding:14px}
+.help-steps h3{margin:0 0 6px;font-size:1rem}
+.help-steps p{margin:0;color:var(--muted);font-size:.9rem;line-height:1.5}
+.template-editor{display:grid;gap:12px}
+.template-editor p{margin:0;color:var(--muted);line-height:1.55}
+.template-token-list{display:flex;flex-wrap:wrap;gap:8px}
+.template-token-list code{border-radius:999px;background:#f1efe9;padding:6px 10px;font-family:ui-monospace,monospace;font-size:.78rem}
+.template-editor textarea{width:100%;min-height:420px;resize:vertical;border:1px solid var(--line);border-radius:16px;background:#fff;padding:14px;font:inherit;line-height:1.5}
+.form-error{margin:0;color:#a33d27;font-size:.85rem;font-weight:800}
+.recent-strip button{flex:0 0 auto}
+@media(max-width:900px){
+  .help-steps{grid-template-columns:1fr}
+}
+@media(max-width:620px){
+  .topbar{align-items:flex-start}
+  .brand strong{font-size:1.35rem}
+  .top-actions{gap:6px;flex-wrap:nowrap}
+  .top-actions .help-button,
+  .top-actions .icon-button,
+  .top-actions .primary-button{width:44px;height:44px;min-height:44px;padding:0;border-radius:14px;justify-content:center}
+  .top-actions .primary-button{gap:0}
+  .top-actions .help-button{font-size:0}
+  .top-actions .help-button .ui-icon{--icon-size:18px}
+  .top-actions .help-button span:last-child{display:none}
+  .top-actions .primary-button span:last-child{display:none}
+  .prompt-paper-actions{flex-wrap:wrap;justify-content:flex-end}
+  .prompt-copy-top{padding:8px 10px}
+  .copy-prompt{width:100%}
+  .recent-strip{padding-bottom:2px;-webkit-overflow-scrolling:touch}
+  .recent-strip>span{flex:0 0 auto}
+  .template-editor textarea{min-height:360px}
+}

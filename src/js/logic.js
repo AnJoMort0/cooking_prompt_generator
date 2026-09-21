@@ -486,14 +486,11 @@ function inferCategory(name, categories, stock) {
     return null;
 }
 
-function makePrompt(state, tone) {
-    const categoryById = Object.fromEntries(state.categories.map(category => [category.id, category.name]));
-    const available = state.stock.filter(i => i.quantity > 0).map(i => {
-        const category = i.categoryId ? categoryById[i.categoryId] : "";
-        const statuses = statusText(i);
-        return `${i.name} (${formatQuantity(i.quantity)}${i.unit ? ` ${i.unit}` : ""}${category ? `, ${category}` : ""}${statuses.length ? `, ${statuses.join(", ")}` : ""})`;
-    }).join(", ");
-    const favourites = topRecipeItems(state).map(x => `${x.item.name} (${x.count} saved recipes)`).join(", ") || "No history yet";
+const REQUIRED_PROMPT_TOKENS = ["{{CURRENT_STOCK}}", "{{LOCAL_HABITS}}", "{{TONE_PREFERENCE}}"];
+function promptTonePreference(tone) {
+    return tone === "healthy" ? "health-forward and deeply flavourful" : tone === "comfort" ? "bold comfort food without being careless" : "mostly healthy, always flavour-first, occasional cheaty option";
+}
+function defaultPromptTemplate() {
     return `Act as my practical, inventive home cook. Use my real stock and return four clearly different recipes I could cook now, plus one PREP AHEAD recipe when the stock genuinely supports it. The prep-ahead recipe is intentionally allowed to be for tomorrow or later rather than tonight.
 
 KITCHEN
@@ -502,14 +499,14 @@ KITCHEN
 - Very small air fryer
 - Default: 1 portion
 - Longer freezer-friendly meals: 4 portions, eat 1 and freeze 3
-- Portuguese food matters, but include Mediterranean, South American and Asian ideas
-- Preference: ${tone === "healthy" ? "health-forward and deeply flavourful" : tone === "comfort" ? "bold comfort food without being careless" : "mostly healthy, always flavour-first, occasional cheaty option"}
+- Cuisine preferences: keep this broad and adaptable to the user rather than locked to one country. You can still lean into any cuisines the user mentions.
+- Preference: {{TONE_PREFERENCE}}
 
 CURRENT STOCK
-${available}
+{{CURRENT_STOCK}}
 
 LOCAL HABITS
-Frequently represented in saved recipes: ${favourites}
+Frequently represented in saved recipes: {{LOCAL_HABITS}}
 
 STOCK TAGS
 - Tags are independent and can stack. An item can be open + near expiry, frozen + leftover, or any other sensible combination.
@@ -573,11 +570,40 @@ JSON RULES:
 STRATEGIC SHOPPING UNLOCK:
 The shopping array is NOT every missing ingredient from the recipes. It is a separate strategic list of only 0-3 additional ingredients total, chosen together to unlock the maximum number and variety of realistic extra recipes when combined with CURRENT STOCK. Think of it as a small set-cover problem: prefer ingredients that complete many near-miss meals, avoid redundant picks that unlock mostly the same dishes, and favour ingredients that connect strongly to several things already in stock. Do not recommend something merely because it is a generally useful staple. If buying nothing meaningfully improves recipe coverage, return an empty shopping array.`;
 }
+function normalisePromptTemplate(template) {
+    return typeof template === "string" && template.trim() ? template.replace(/\r\n/g, "\n").trim() : defaultPromptTemplate();
+}
+function promptTemplateHasRequiredTokens(template) {
+    return REQUIRED_PROMPT_TOKENS.every(token => template.includes(token));
+}
+function applyPromptTemplate(template, values) {
+    const safe = promptTemplateHasRequiredTokens(template) ? template : defaultPromptTemplate();
+    return safe
+        .replaceAll("{{CURRENT_STOCK}}", values.currentStock)
+        .replaceAll("{{LOCAL_HABITS}}", values.localHabits)
+        .replaceAll("{{TONE_PREFERENCE}}", values.tonePreference);
+}
+
+function makePrompt(state, tone) {
+    const categoryById = Object.fromEntries(state.categories.map(category => [category.id, category.name]));
+    const available = state.stock.filter(i => i.quantity > 0).map(i => {
+        const category = i.categoryId ? categoryById[i.categoryId] : "";
+        const statuses = statusText(i);
+        return `${i.name} (${formatQuantity(i.quantity)}${i.unit ? ` ${i.unit}` : ""}${category ? `, ${category}` : ""}${statuses.length ? `, ${statuses.join(", ")}` : ""})`;
+    }).join(", ");
+    const favourites = topRecipeItems(state).map(x => `${x.item.name} (${x.count} saved recipes)`).join(", ") || "No history yet";
+    return applyPromptTemplate(normalisePromptTemplate(state.promptTemplate), {
+        currentStock: available,
+        localHabits: favourites,
+        tonePreference: promptTonePreference(tone)
+    });
+}
 
 function migrateLegacyStatuses(state) {
     if (!state || !Array.isArray(state.stock)) return state;
     return {
         ...state,
+        promptTemplate: normalisePromptTemplate(state.promptTemplate),
         stock: state.stock.map(item => {
             const legacy = item.status === "low" || item.status === "fresh" || item.status === "ready" || item.status === "out" ? [] : itemStatuses(item);
             const statuses = Array.isArray(item.statuses) ? itemStatuses(item) : legacy;
@@ -781,6 +807,7 @@ function mergeTransferredState(currentState, incomingState) {
             recipes: recipeMerge.records,
             shopping: shoppingMerge.records,
             analytics: mergeAnalytics(current.analytics, incoming.analytics),
+            promptTemplate: normalisePromptTemplate(incoming.promptTemplate || current.promptTemplate),
             activity
         },
         summary: {

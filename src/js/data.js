@@ -24,4 +24,4 @@ const seedStock = rows.map(([name, quantity, unit, categoryId, status], index) =
     updatedAt: now - index
 }));
 const stapleIdeas = ["Onions", "Garlic", "Potatoes", "Canned tomatoes", "Chicken stock", "Greek yoghurt", "Fresh coriander", "Chickpeas", "Coconut milk"];
-function freshState() { return { version: 1, categories: defaultCategories.map(c => ({ ...c })), stock: seedStock.map(i => ({ ...i })), shopping: [], recipes: [], analytics: {}, activity: [] }; }
+function freshState() { return { version: 1, categories: defaultCategories.map(c => ({ ...c })), stock: seedStock.map(i => ({ ...i })), shopping: [], recipes: [], analytics: {}, activity: [], promptTemplate: typeof defaultPromptTemplate === "function" ? defaultPromptTemplate() : "" }; }

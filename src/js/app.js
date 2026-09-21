@@ -61,6 +61,8 @@ function App() {
     const [showAdd, setShowAdd] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [showHelp, setShowHelp] = useState(false);
+    const [showPromptDefaults, setShowPromptDefaults] = useState(false);
     const [showTransfer, setShowTransfer] = useState(false);
     const [incomingTransfer, setIncomingTransfer] = useState(null);
     const [showImport, setShowImport] = useState(false);
@@ -319,9 +321,12 @@ function App() {
                     h("span", { className: `privacy-pill ${online ? "" : "offline"}` },
                         online ? h(Wifi, null) : h(WifiOff, null),
                         online ? "Online" : "Offline cache"),
+                    h("button", { className: "soft-button help-button", onClick: () => setShowHelp(true), title: "How to use Mise", "aria-label": "How to use Mise" },
+                        h(BookOpen, null),
+                        h("span", null, "How to use")),
                     h("button", { className: "icon-button", onClick: () => setShowSettings(true), "aria-label": "Settings" },
                         h(Settings, null)),
-                    h("button", { className: "primary-button", onClick: () => setShowAdd(true) },
+                    h("button", { className: "primary-button", onClick: () => setShowAdd(true), "aria-label": "Add stock" },
                         h(Plus, null),
                         "Add stock"))),
             h("nav", { className: "desktop-nav", "aria-label": "Main navigation" },
@@ -501,6 +506,7 @@ function App() {
                             "Cooking prompt"),
                         h("div", { className: "prompt-paper-actions" },
                             h("small", null, "Generated locally"),
+                            h("button", { className: "prompt-copy-top", onClick: () => setShowPromptDefaults(true), title: "Edit default prompt" }, h(Pencil, null), "Edit default"),
                             h("button", { className: "prompt-copy-top", onClick: copyPrompt, title: "Copy cooking prompt" }, h(Clipboard, null), "Copy"))),
                     h("pre", null, prompt))),
             tab === "cook" && h("button", { className: "copy-prompt-floating", onClick: copyPrompt, title: "Copy cooking prompt", "aria-label": "Copy cooking prompt" }, h(Clipboard, null), h("span", null, "Copy prompt"))),
@@ -509,6 +515,8 @@ function App() {
             h(NavButton, { active: tab === "shopping", onClick: () => setTab("shopping"), icon: h(ShoppingBasket, null), label: "Shop", count: state.shopping.length }),
             h(NavButton, { active: tab === "recipes", onClick: () => setTab("recipes"), icon: h(BookOpen, null), label: "Recipes" }),
             h(NavButton, { active: tab === "cook", onClick: () => setTab("cook"), icon: h(Sparkles, null), label: "Cook" })),
+        showHelp && h(HelpModal, { onClose: () => setShowHelp(false), onEditPrompt: () => { setShowHelp(false); setShowPromptDefaults(true); } }),
+        showPromptDefaults && h(PromptDefaultsModal, { value: state.promptTemplate || defaultPromptTemplate(), onClose: () => setShowPromptDefaults(false), onSave: template => { setState(current => ({ ...current, promptTemplate: normalisePromptTemplate(template), activity: [activity("prompt", "Default cooking prompt updated"), ...current.activity].slice(0, 100) })); setShowPromptDefaults(false); notify("Default prompt saved"); } }),
         showAdd && h(Modal, { title: "Add to stock", onClose: () => setShowAdd(false) },
             h("form", { className: "form-grid", onSubmit: addStock },
                 h("label", { className: "full" },
@@ -574,7 +582,7 @@ function App() {
                     h("button", { className: "soft-button", onClick: () => setShowRecipeImport(false) }, "Cancel"),
                     h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
         selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
-        showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); } }),
+        showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); }, onHelp: () => { setShowSettings(false); setShowHelp(true); }, onEditPromptDefaults: () => { setShowSettings(false); setShowPromptDefaults(true); } }),
         showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify, onReceive: payload => { setShowTransfer(false); setIncomingTransfer(payload); } }),
         incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onMerge: () => mergeIncomingTransfer(incomingTransfer), onClose: dismissIncomingTransfer }),
         toast && h("div", { className: "toast", role: "status", "aria-live": "polite" },
@@ -818,7 +826,45 @@ function TransferImportModal({ payload, onMerge, onClose }) {
                 h("button", { className: "soft-button", onClick: onClose }, "Cancel"),
                 h("button", { className: "primary-button", onClick: onMerge }, h(GitMerge, null), "Merge into this device"))));
 }
-function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify, onTransfer }) {
+function HelpModal({ onClose, onEditPrompt }) {
+    return h(Modal, { title: "How to use Mise", onClose, wide: true },
+        h("div", { className: "help-guide" },
+            h("p", { className: "help-lead" }, "Mise is a simple kitchen organiser. You add what you have, save useful recipes, and let the app build a cooking prompt and a focused shopping list from your real stock."),
+            h("div", { className: "help-steps" },
+                h("section", null, h("h3", null, "1. Add what you have"), h("p", null, "Tap the + button to add ingredients. Give each item a quantity, unit and category. Use the little status icons for things like open, frozen, near expiry and leftover.")),
+                h("section", null, h("h3", null, "2. Keep stock up to date"), h("p", null, "Use the + and − controls on each stock card for quick changes. Tap the pencil icon when you need to edit the name, category, unit or step size.")),
+                h("section", null, h("h3", null, "3. Use the shopping page"), h("p", null, "Add manual shopping items or paste the AI shopping block. When you buy something, tap Stock to move it straight into your pantry.")),
+                h("section", null, h("h3", null, "4. Save recipes you like"), h("p", null, "On the Recipes page, import a structured AI recipe reply. Mise turns it into recipe cards with ingredients, timing, tags and stock matching.")),
+                h("section", null, h("h3", null, "5. Cook from your prompt"), h("p", null, "The Cook page builds a ready-to-copy prompt from your live stock. If you want a different default style or cuisine, edit the default cooking prompt and make it your own.")),
+                h("section", null, h("h3", null, "6. Move data to another device"), h("p", null, "Open settings and use Transfer between devices. Small kitchens can use a QR or link. Bigger kitchens switch to a .mise transfer file automatically."))),
+            h("div", { className: "modal-actions" },
+                h("button", { className: "soft-button", onClick: onEditPrompt }, h(Pencil, null), "Edit default prompt"),
+                h("button", { className: "primary-button", onClick: onClose }, "Got it"))));
+}
+
+function PromptDefaultsModal({ value, onClose, onSave }) {
+    const [draft, setDraft] = useState(normalisePromptTemplate(value));
+    const [error, setError] = useState("");
+    const save = () => {
+        const next = normalisePromptTemplate(draft);
+        if (!promptTemplateHasRequiredTokens(next)) {
+            setError(`Keep these placeholders in the template: ${REQUIRED_PROMPT_TOKENS.join(", ")}`);
+            return;
+        }
+        onSave(next);
+    };
+    return h(Modal, { title: "Default cooking prompt", onClose, wide: true },
+        h("div", { className: "template-editor" },
+            h("p", null, "This is the reusable default behind the Cook page. Edit it once and Mise will use it for future prompt copies. You can rewrite the cuisine guidance, tone or output instructions, but keep the placeholders below so live data can still be inserted."),
+            h("div", { className: "template-token-list" }, REQUIRED_PROMPT_TOKENS.map(token => h("code", { key: token }, token))),
+            h("textarea", { value: draft, rows: 22, onChange: event => { setDraft(event.target.value); if (error) setError(""); } }),
+            error && h("p", { className: "form-error" }, error),
+            h("div", { className: "modal-actions" },
+                h("button", { className: "soft-button", onClick: () => { setDraft(defaultPromptTemplate()); setError(""); } }, h(ArchiveRestore, null), "Reset to app default"),
+                h("button", { className: "primary-button", onClick: save }, h(Pencil, null), "Save default"))));
+}
+
+function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify, onTransfer, onHelp, onEditPromptDefaults }) {
     const [name, setName] = useState("");
     const [color, setColor] = useState(palette[0]);
     const [icon, setIcon] = useState("");
@@ -862,6 +908,12 @@ function SettingsModal({ state, setState, onClose, exportData, importRef, restor
                     h("button", { className: "soft-button transfer-button", onClick: onTransfer },
                         h(QrCode, null),
                         "Transfer between devices"),
+                    h("button", { className: "soft-button", onClick: onHelp },
+                        h(BookOpen, null),
+                        "How to use Mise"),
+                    h("button", { className: "soft-button", onClick: onEditPromptDefaults },
+                        h(Pencil, null),
+                        "Edit cooking prompt default"),
                     h("button", { className: "soft-button", onClick: exportData },
                         h(HardDriveDownload, null),
                         "Download backup"),
