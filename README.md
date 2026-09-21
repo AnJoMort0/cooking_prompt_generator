@@ -6,7 +6,7 @@
 
 Instead of starting from a recipe and then buying half a supermarket, Mise starts with your real kitchen stock. It keeps track of what you have, helps you build a smarter shopping list, saves recipes you actually want to make again, and generates a cooking brief you can paste into an AI assistant for meal ideas based on your current ingredients.
 
-**Try it here:** [anjomort0.github.io/cooking_prompt_generator](https://anjomort0.github.io/mise/)
+**Try it here:** [anjomort0.github.io/mise](https://anjomort0.github.io/mise/)
 
 ---
 
