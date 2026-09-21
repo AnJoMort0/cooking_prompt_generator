@@ -129,11 +129,12 @@ STEPS:
 
 For PREP AHEAD, the numbered steps must explicitly say what I should do now, how to store/rest it, and what I should do tomorrow/later.
 
-Then, when worthwhile, provide one combined importable list of possible new ingredients to buy, unlocking new recipes with the  for all proposed recipes:
+Then provide a strategic shopping-unlock list. This is NOT a combined list of every [BUY] ingredient used above. Recommend only 0–3 additional ingredients total, chosen as a set to unlock the maximum number and variety of realistic extra recipes when combined with CURRENT STOCK. Think of this as a small set-cover problem: prefer ingredients that complete many near-miss meals, avoid redundant picks that unlock mostly the same dishes, and favour versatile ingredients that connect strongly to several things I already have. Do not recommend an item merely because it is a generally useful staple. If buying nothing would meaningfully improve recipe coverage, return an empty block.
+
 [SHOPPING]
-- Item name | quantity | short reason
+- Item name | practical quantity | concise reason naming the kinds of recipes it unlocks
 [END SHOPPING]
-No commentary inside marked blocks.`;
+Use 0, 1, 2, or 3 lines only inside [SHOPPING]. No commentary inside marked blocks.`;
 }
 
 function loadState() {

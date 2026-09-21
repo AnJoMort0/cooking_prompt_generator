@@ -1,130 +1,94 @@
-<p align="center">
-  <img src="assets/readme/hero.svg" alt="Mise — cook with what you have" width="100%">
-</p>
-
 # Mise
 
-**Mise is a local-first kitchen companion for keeping track of what you have, what you need, and what you can cook next.**
+**Mise** is a small cooking companion built around one question:
 
-It brings pantry tracking, shopping, saved recipes, and an AI-ready cooking brief into one small static web app. There is no account, database, backend, npm install, or build step required to deploy it. The repository can be published directly to GitHub Pages and installed as a PWA.
+> **What can I cook with what I already have?**
 
-## The idea
+Instead of starting from a recipe and then buying half a supermarket, Mise starts with your real kitchen stock. It keeps track of what you have, helps you build a smarter shopping list, saves recipes you actually want to make again, and generates a cooking brief you can paste into an AI assistant for meal ideas based on your current ingredients.
 
-Most recipe apps start with a dish and tell you what to buy. Mise starts with **your actual kitchen**.
+**Try it here:** [anjomort0.github.io/cooking_prompt_generator](https://anjomort0.github.io/cooking_prompt_generator/)
 
-Track what is in stock, mark ingredients as open, frozen, low, or out, and let Mise surface useful local signals such as what to use first, common restocks, and ingredients that repeatedly appear in recipes you save. When you want ideas, Mise turns the current state of your kitchen into a structured prompt you can copy into the AI assistant of your choice.
-
-The cooking brief includes quick meals, more involved options, freezer-friendly batch cooking, a wild card, and — when the stock makes sense — a **prep-ahead idea** you can start today and finish tomorrow or later, such as a long marinade, overnight soak/proof, pickle, ferment, or other slow preparation.
-
-<p align="center">
-  <img src="assets/readme/stock-overview.png" alt="Mise stock dashboard showing pantry signals, filters and ingredient cards" width="100%">
-</p>
+---
 
 ## What it does
 
-- **Stock** — Track ingredients, quantities, categories, and states such as open, frozen, low, and out.
-- **Shopping** — Build a list manually, import a `[SHOPPING]` block, or use locally ranked restock suggestions.
-- **Recipes** — Save recipe text and compare its ingredients with what is currently in stock.
-- **Cook** — Generate a detailed cooking brief from live stock, saved-recipe habits, and your preferred cooking tone.
-- **Prep ahead** — Let the cooking brief suggest something worth starting now for tomorrow or later when a long rest genuinely improves it.
-- **Local signals** — Learn simple patterns from shopping and stock activity without sending kitchen data to an application backend.
-- **Backup & restore** — Export Mise data as JSON and restore it later from Settings.
-- **Installable PWA** — After a successful hosted visit, the app shell and Lucide icon library are cached for later use.
+### Keep track of your stock
 
-## Run it
+Add the ingredients you already have at home and keep track of quantity, unit, category, and state such as **open**, **frozen**, **low**, or **out**.
 
-### Recommended: GitHub Pages / HTTPS
+You can edit ingredients later, move things onto your shopping list, and quickly see what is actually available before deciding what to cook.
 
-Mise is designed to be deployed as a static PWA. Push the repository to GitHub, enable **Pages → GitHub Actions**, and the included workflow publishes the files directly — there is no build job.
+### Build a smarter shopping list
 
-The first hosted visit needs a connection so the browser can fetch the app and the pinned Lucide icon library. The service worker then caches the application shell and icon library so subsequent launches can work from cache when the network is unavailable.
+Mise has a normal shopping list, but it also learns from your local usage and can surface useful suggestions.
 
-### Open `index.html` directly
+When generating a cooking brief, it can recommend **0–3 carefully chosen ingredients** that would unlock the largest number and variety of additional meals using the stock you already have.
 
-You can still double-click `index.html` and use the app as a normal static page. In that mode:
+The goal is not to tell you to buy everything a recipe is missing — it is to identify the smallest number of useful additions that make your kitchen more flexible.
 
-- no Vite, npm, pnpm, Live Server, or localhost is required;
-- Lucide icons require a connection unless the browser already has them cached independently;
-- PWA installation/service-worker caching does **not** run from `file://`, because service workers require HTTPS or localhost.
+### Save recipes you want to keep
 
-For the intended experience, use the GitHub Pages deployment.
+Paste a generated recipe, or any recipe with a clear ingredients section, into the recipe library.
 
-## Privacy and data
+Mise compares it with your current stock and remembers which ingredients appear in the recipes you actually save, helping future suggestions become more relevant to the way you cook.
 
-Mise stores pantry data, recipes, shopping history, categories, and local usage signals in browser storage. It does not send those records to an application backend.
+### Generate a cooking brief
 
-The **Cook** screen builds its prompt locally. Mise itself does not call an AI API; copying the prompt into another service is an explicit user action.
+The **Cook** section turns your current stock, kitchen setup, preferences, and local history into a ready-to-use AI prompt.
 
-Hosted mode does make ordinary static-asset requests for the site itself and for the pinned Lucide icon library. Those requests do not contain your pantry, recipes, or shopping history.
+It asks for:
 
-Use **Settings → Download backup** before clearing browser data or moving to another device/browser.
+- several genuinely different meals you can cook now
+- realistic use of the ingredients you already have
+- minimal additional shopping
+- an optional **prep-ahead recipe** when your stock suits something that benefits from marinating, brining, soaking, proofing, pickling, fermenting, curing, or another long rest
+- up to **three high-impact shopping suggestions** that unlock the most extra recipes
 
-## Repository structure
+That means you might choose dinner for tonight while also noticing that you could start tomorrow's meal now.
 
-```text
-.
-├── index.html
-├── manifest.webmanifest
-├── sw.js
-├── assets/
-│   ├── icons/
-│   │   ├── favicon.svg
-│   │   ├── icon-180.png
-│   │   ├── icon-192.png
-│   │   └── icon-512.png
-│   └── readme/
-│       ├── hero.svg
-│       └── stock-overview.png
-├── src/
-│   ├── css/
-│   │   └── styles.css
-│   └── js/
-│       ├── runtime.js
-│       ├── icons.js
-│       ├── data.js
-│       ├── logic.js
-│       ├── app.js
-│       └── pwa.js
-└── .github/
-    └── workflows/
-        └── deploy-pages.yml
-```
+---
 
-## How it is built
+## How to use Mise
 
-Mise deliberately stays build-free:
+1. Open **Stock** and add what is currently in your kitchen.
+2. Update quantities and mark ingredients as open, frozen, low, or out when needed.
+3. Use **Shopping** for things you need to buy and check the smart suggestions if you want ideas.
+4. Open **Cook**, choose the kind of meal you feel like eating, and copy the generated cooking brief into your preferred AI assistant.
+5. Save recipes you like into **Recipes** so Mise can gradually learn what ingredients matter most to you.
+6. Repeat as your kitchen changes.
 
-- `runtime.js` provides the tiny renderer and hooks layer.
-- `icons.js` adapts **Lucide** icons to that renderer.
-- `data.js` contains starter categories and demo pantry data.
-- `logic.js` contains storage, matching, recommendations, recipe parsing, and cooking-prompt generation.
-- `app.js` contains the UI and interactions.
-- `pwa.js`, `manifest.webmanifest`, and `sw.js` provide PWA registration, installation metadata, and caching.
-- `styles.css` contains the responsive visual system.
+Everything is intentionally lightweight: there is no account to create and no complicated setup before you can start using it.
 
-The scripts are loaded as classic browser scripts in dependency order, so there is no bundler or compilation step.
+---
 
-## GitHub Pages
+## Your data
 
-The included workflow publishes the repository directly whenever `main` is updated.
+Mise is designed around local-first use. Your stock, shopping list, recipe library, and usage history are stored in your browser rather than in a Mise account or remote database.
 
-1. Push the project to GitHub.
-2. Open **Settings → Pages**.
-3. Choose **GitHub Actions** as the source.
-4. Push to `main` or run the workflow manually.
-5. Open the HTTPS Pages URL once while online, then install Mise from the browser if desired.
+The cooking brief is generated locally from that information. Nothing is sent to an AI service until **you choose to copy the prompt and paste it into one yourself**.
 
-## Editing the project
+---
 
-- Change visual styling in `src/css/styles.css`.
-- Change starter data in `src/js/data.js`.
-- Change matching, recommendations, or cooking-prompt behaviour in `src/js/logic.js`.
-- Change interface structure in `src/js/app.js`.
-- Change icon names/adaptation in `src/js/icons.js`.
-- Change offline/PWA behaviour in `sw.js`, `manifest.webmanifest`, and `src/js/pwa.js`.
+## AI transparency
 
-The Lucide version is pinned in both `index.html` and `sw.js`; update both together.
+This is a **fully vibe-coded project**.
 
-## Design goals
+The application was created iteratively with AI coding assistance rather than through a traditional hand-written development process. AI has been used extensively for implementation, debugging, UI iteration, copy, and feature development throughout the project.
 
-Mise aims to stay **small, understandable, local-first, installable, and useful in the real flow of deciding what to cook**. It should feel like a practical kitchen dashboard rather than a recipe catalogue: use what you have, notice what needs attention, plan tonight, and sometimes start tomorrow's food today.
+The project is deliberately open about that. The aim is to explore what can be built through conversational, AI-assisted software creation while still producing something useful enough to use day to day.
+
+AI-generated code can contain mistakes. The app is continuously tested, adjusted, and refined as those issues are found.
+
+---
+
+## Why "Mise"?
+
+The name comes from **mise en place** — the habit of getting everything in place before cooking.
+
+Mise applies the same idea one step earlier: know what is already in your kitchen, make better use of it, and decide what is worth preparing next.
+
+---
+
+Built as an experiment in practical home cooking and fully AI-assisted vibe coding.
+
+[View the repository](https://github.com/AnJoMort0/cooking_prompt_generator) · [Open Mise](https://anjomort0.github.io/cooking_prompt_generator/)
