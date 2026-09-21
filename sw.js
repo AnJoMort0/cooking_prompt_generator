@@ -1,4 +1,4 @@
-const VERSION = "mise-pwa-v13";
+const VERSION = "mise-pwa-v16";
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 const LUCIDE_URL = "https://unpkg.com/lucide@1.47.0";
@@ -76,7 +76,7 @@ self.addEventListener("fetch", event => {
     if (request.mode === "navigate") {
         event.respondWith((async () => {
             try {
-                const response = await fetch(request);
+                const response = await fetch(request, { cache: "no-store" });
                 const cache = await caches.open(RUNTIME_CACHE);
                 await cache.put(scoped("./index.html"), response.clone());
                 return response;
@@ -92,7 +92,7 @@ self.addEventListener("fetch", event => {
        fall back to cache if the device is offline. */
     event.respondWith((async () => {
         try {
-            const response = await fetch(request);
+            const response = await fetch(request, { cache: "no-store" });
             if (response.ok) {
                 const cache = await caches.open(RUNTIME_CACHE);
                 await cache.put(request, response.clone());

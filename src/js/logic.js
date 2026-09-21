@@ -49,7 +49,9 @@ const unitAliases = {
     cup: "cup", cups: "cup",
     piece: "piece", pieces: "piece", item: "piece", items: "piece", pc: "piece", pcs: "piece",
     can: "can", cans: "can", pack: "pack", packs: "pack", packet: "pack", packets: "pack",
-    slice: "slice", slices: "slice", clove: "clove", cloves: "clove", bunch: "bunch", bunches: "bunch"
+    slice: "slice", slices: "slice", clove: "clove", cloves: "clove", bunch: "bunch", bunches: "bunch",
+    portion: "portion", portions: "portion", serving: "portion", servings: "portion",
+    jar: "jar", jars: "jar", bottle: "bottle", bottles: "bottle", loaf: "loaf", loaves: "loaf", box: "box", boxes: "box", block: "block", blocks: "block"
 };
 const unitMeasures = {
     mg: { family: "mass", factor: 0.001 }, g: { family: "mass", factor: 1 }, kg: { family: "mass", factor: 1000 },
@@ -117,13 +119,44 @@ function cleanIngredient(line) {
     const words = before.replace(/^\d+[\d\s/.,-]*\s*/, "").split(/\s+/).filter(word => !units.has(normalise(word)));
     return words.join(" ").replace(/[,:;]+$/, "").trim();
 }
+function normaliseRecipeImportText(text) {
+    let raw = String(text || "")
+        .replace(/\r\n?/g, "\n")
+        .replace(/\u00a0/g, " ")
+        .replace(/[\u200b-\u200d\ufeff]/g, "")
+        .replace(/[｜￨]/g, "|");
+
+    /* Chat/copy surfaces can escape structural characters even when the
+       rendered answer looks normal. Remove those escapes only around Mise's
+       machine-readable syntax, leaving recipe prose alone. */
+    raw = raw
+        .replace(/\\(?====\s*(?:RECIPE|END RECIPE)\s*===)/gi, "")
+        .replace(/\\(?=\[(?:STOCK|BUY|SHOPPING|END SHOPPING)\])/gi, "")
+        .replace(/^\s*```(?:json|text|plaintext|markdown)?\s*$/gmi, "")
+        .replace(/^\s*```\s*$/gmi, "");
+
+    /* Restore structural boundaries that rich-text clipboard paths sometimes
+       glue onto the preceding line. */
+    raw = raw.replace(/([^\n])\s+(?=(?:\*\*|__)?(?:TITLE|MODE|CUISINE|TAGS|SERVINGS|ACTIVE MINUTES|TOTAL MINUTES|LEAD TIME|INGREDIENTS|STEPS|METHOD|INSTRUCTIONS)(?:\*\*|__)?\s*:)/gi, "$1\n");
+    raw = raw.replace(/([^\n])\s+(?=(?:\\)?===\s*(?:RECIPE|END RECIPE)\s*===)/gi, "$1\n");
+
+    const fieldLine = /^[ \t]*(?:>[ \t]*)?(?:[-*•][ \t]*)?(?:\*\*|__)?(TITLE|MODE|CUISINE|TAGS|SERVINGS|ACTIVE MINUTES|TOTAL MINUTES|LEAD TIME|INGREDIENTS|STEPS|METHOD|INSTRUCTIONS)(?:\*\*|__)?[ \t]*:[ \t]*(?:\*\*|__)?(.*)$/i;
+    raw = raw.split("\n").map(line => {
+        const match = line.match(fieldLine);
+        if (!match) return line;
+        return `${match[1].toUpperCase()}: ${match[2].replace(/(?:\*\*|__)\s*$/, "").trim()}`;
+    }).join("\n");
+    return raw.trim();
+}
+
 function recipeTitle(text) {
-    const explicit = String(text || "").match(/^\s*TITLE\s*:\s*(.+)$/im)?.[1];
-    return (explicit || String(text || "").split(/\r?\n/).find(line => line.trim()) || "Untitled recipe").replace(/^#+\s*/, "").trim().slice(0, 90);
+    const raw = normaliseRecipeImportText(text);
+    const explicit = raw.match(/^\s*TITLE\s*:\s*(.+)$/im)?.[1];
+    return (explicit || raw.split(/\r?\n/).find(line => line.trim()) || "Untitled recipe").replace(/^#+\s*/, "").trim().slice(0, 90);
 }
 function recipeIngredientObjects(recipe) {
     return (Array.isArray(recipe?.ingredients) ? recipe.ingredients : []).map(value => {
-        if (value && typeof value === "object") return { name: String(value.name || "Ingredient"), source: value.source === "buy" ? "buy" : "stock", quantity: value.quantity == null ? null : Number(value.quantity), unit: String(value.unit || ""), amountText: String(value.amountText || "") };
+        if (value && typeof value === "object") return { name: String(value.name || "Ingredient"), source: String(value.source || "stock").toLowerCase() === "buy" ? "buy" : "stock", quantity: value.quantity == null || value.quantity === "" ? null : Number(value.quantity), unit: String(value.unit || ""), amountText: String(value.amountText || "") };
         return { name: String(value || "Ingredient"), source: "stock", quantity: null, unit: "", amountText: "" };
     }).filter(item => item.name.trim());
 }
@@ -139,10 +172,15 @@ function parseDuration(value) {
     return Number.isFinite(number) ? Math.round(number) : null;
 }
 function lineField(text, name) {
-    return String(text || "").match(new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*:\\s*(.+)$`, "im"))?.[1]?.trim() || "";
+    const raw = normaliseRecipeImportText(text);
+    return raw.match(new RegExp(`^\\s*${name.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*:\\s*(.+)$`, "im"))?.[1]?.replace(/(?:\*\*|__)\s*$/, "").trim() || "";
 }
 function parseIngredientLine(line) {
-    const stripped = String(line || "").replace(/^\s*[-*•]\s*/, "").trim();
+    const stripped = String(line || "")
+        .replace(/[\u200b-\u200d\ufeff]/g, "")
+        .replace(/^\s*(?:>\s*)?(?:\\?[-*•]\s*)?/, "")
+        .replace(/\\(?=\[(?:stock|buy)\])/gi, "")
+        .trim();
     const source = stripped.match(/^\[(stock|buy)\]\s*/i)?.[1]?.toLowerCase() || "stock";
     const body = stripped.replace(/^\[(stock|buy)\]\s*/i, "").trim();
     const parts = body.split("|").map(part => part.trim());
@@ -163,24 +201,32 @@ function parseIngredientLine(line) {
     return { name: cleanIngredient(body) || body, source, quantity: null, unit: "", amountText: "" };
 }
 function parseSteps(text) {
-    const lines = String(text || "").split(/\r?\n/);
-    const start = lines.findIndex(line => /^\s*(steps|method|instructions)\s*:?\s*$/i.test(line));
+    const raw = normaliseRecipeImportText(text);
+    const lines = raw.split(/\r?\n/);
+    let start = lines.findIndex(line => /^\s*(?:>\s*)?(?:[-*•]\s*)?(?:steps|method|instructions)\s*:?\s*$/i.test(line));
+    if (start < 0) {
+        const ingredientStart = lines.findIndex(line => /^\s*(?:ingredients|ingredients used)\s*:?\s*$/i.test(line));
+        start = lines.findIndex((line, index) => index > ingredientStart && /^\s*(?:>\s*)?(?:\*\*)?1[.)](?:\*\*)?\s+/.test(line));
+        if (start >= 0) start -= 1;
+    }
     if (start < 0) return [];
     const result = [];
     for (const line of lines.slice(start + 1)) {
-        if (/^\s*===\s*END RECIPE\s*===/i.test(line)) break;
-        const numbered = line.match(/^\s*(?:\d+[.)]|[-*•])\s*(.+)$/);
+        if (/^\s*(?:\\)?===\s*END RECIPE\s*===/i.test(line)) break;
+        if (/^\s*\\?\[?SHOPPING\]?\s*:?\s*$/i.test(line)) break;
+        const numbered = line.match(/^\s*(?:>\s*)?(?:\*\*)?(?:\d+)[.)](?:\*\*)?\s*(.+)$/) || line.match(/^\s*(?:>\s*)?[-*•]\s*(.+)$/);
         if (numbered) result.push(numbered[1].trim());
         else if (line.trim() && result.length) result[result.length - 1] += ` ${line.trim()}`;
     }
     return result.filter(Boolean);
 }
 function parseSingleRecipe(text) {
-    const raw = String(text || "").trim();
+    const raw = normaliseRecipeImportText(text);
     const lines = raw.split(/\r?\n/);
-    const ingredientStart = lines.findIndex(line => /^\s*(ingredients|ingredients used)\s*:?\s*$/i.test(line));
-    const stepStart = lines.findIndex((line, index) => index > ingredientStart && /^\s*(steps|method|instructions)\s*:?\s*$/i.test(line));
-    const ingredientLines = ingredientStart >= 0 ? lines.slice(ingredientStart + 1, stepStart > ingredientStart ? stepStart : undefined).filter(line => /^\s*[-*•]\s+/.test(line)) : lines.filter(line => /^\s*[-*•]\s+(?:\[(?:stock|buy)\])?/i.test(line));
+    const ingredientStart = lines.findIndex(line => /^\s*(?:>\s*)?(?:ingredients|ingredients used)\s*:?\s*$/i.test(line));
+    const stepStart = lines.findIndex((line, index) => index > ingredientStart && /^\s*(?:>\s*)?(?:steps|method|instructions)\s*:?\s*$/i.test(line));
+    const sectionLines = ingredientStart >= 0 ? lines.slice(ingredientStart + 1, stepStart > ingredientStart ? stepStart : undefined) : lines;
+    const ingredientLines = sectionLines.filter(line => /^\s*(?:>\s*)?(?:\\?[-*•]\s*)?\\?\[(?:stock|buy)\]\s*/i.test(line));
     const ingredients = ingredientLines.map(parseIngredientLine).filter(item => item.name && normalise(item.name) !== "water");
     const timeLine = lineField(raw, "TIME");
     const activeField = lineField(raw, "ACTIVE MINUTES");
@@ -209,20 +255,146 @@ function parseSingleRecipe(text) {
         lastCookedAt: null
     };
 }
-function parseRecipeBlocks(text) {
-    const raw = String(text || "").trim();
+
+function structuredRecipe(value) {
+    if (!value || typeof value !== "object") return null;
+    const rawTags = Array.isArray(value.tags) ? value.tags : String(value.tags || "").split(/[,;|]/);
+    const ingredients = (Array.isArray(value.ingredients) ? value.ingredients : []).map(item => {
+        if (typeof item === "string") return parseIngredientLine(item);
+        const quantity = item?.quantity == null || item.quantity === "" ? null : parseNumberish(item.quantity);
+        return {
+            name: String(item?.name || "").trim(),
+            source: String(item?.source || "stock").toLowerCase() === "buy" ? "buy" : "stock",
+            quantity,
+            unit: String(item?.unit || "").trim(),
+            amountText: quantity == null ? String(item?.amountText || "") : `${item.quantity}${item?.unit ? ` ${item.unit}` : ""}`.trim()
+        };
+    }).filter(item => item.name && normalise(item.name) !== "water");
+    const steps = (Array.isArray(value.steps) ? value.steps : String(value.steps || "").split(/\n+/)).map(step => String(step || "").replace(/^\s*\d+[.)]\s*/, "").trim()).filter(Boolean);
+    const mode = String(value.mode || "").trim();
+    const tags = rawTags.map(tag => String(tag || "").trim()).filter(Boolean).slice(0, 8);
+    if (mode && !tags.some(tag => normalise(tag) === normalise(mode))) tags.unshift(mode);
+    return {
+        id: uuid(),
+        title: String(value.title || "Untitled recipe").trim().slice(0, 90),
+        mode,
+        cuisine: String(value.cuisine || "").trim(),
+        tags,
+        servings: Number(value.servings) || null,
+        activeMinutes: parseDuration(value.activeMinutes ?? value.active_minutes),
+        totalMinutes: parseDuration(value.totalMinutes ?? value.total_minutes),
+        leadTime: String(value.leadTime ?? value.lead_time ?? "none").trim() || "none",
+        ingredients,
+        steps,
+        text: JSON.stringify(value, null, 2),
+        createdAt: Date.now(),
+        timesCooked: 0,
+        lastCookedAt: null
+    };
+}
+function structuredShoppingItem(value) {
+    if (typeof value === "string") return parseShoppingLine(value);
+    if (!value || typeof value !== "object") return null;
+    const quantity = value.quantity == null || value.quantity === "" ? 1 : parseNumberish(value.quantity);
+    return {
+        name: String(value.name || "").trim(),
+        quantity: quantity == null ? 1 : quantity,
+        unit: String(value.unit || "").trim(),
+        reason: String(value.reason || "").trim()
+    };
+}
+function parseMiseAiPayload(text) {
+    const source = String(text || "").replace(/\r\n?/g, "\n").replace(/[\u200b-\u200d\ufeff]/g, "").trim();
+    if (!source) return null;
+    const candidates = [];
+    const fenced = [...source.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map(match => match[1].trim());
+    candidates.push(...fenced);
+    const firstBrace = source.indexOf("{");
+    const lastBrace = source.lastIndexOf("}");
+    if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(source.slice(firstBrace, lastBrace + 1));
+    if (source.startsWith("{") && source.endsWith("}")) candidates.push(source);
+    for (const candidate of candidates) {
+        for (const attempt of [candidate, candidate.replace(/,\s*([}\]])/g, "$1")]) {
+            try {
+                const parsed = JSON.parse(attempt);
+                if (!parsed || typeof parsed !== "object" || (!Array.isArray(parsed.recipes) && !Array.isArray(parsed.shopping))) continue;
+                return {
+                    format: String(parsed.format || ""),
+                    recipes: (parsed.recipes || []).map(structuredRecipe).filter(Boolean),
+                    shopping: (parsed.shopping || []).map(structuredShoppingItem).filter(item => item?.name)
+                };
+            }
+            catch { }
+        }
+    }
+    return null;
+}
+function legacyRecipeBlocks(text) {
+    const raw = normaliseRecipeImportText(text);
     if (!raw) return [];
-    const matches = [...raw.matchAll(/===\s*RECIPE\s*===([\s\S]*?)(?:===\s*END RECIPE\s*===|(?====\s*RECIPE\s*===)|$)/gi)];
-    const blocks = matches.length ? matches.map(match => match[1].trim()).filter(Boolean) : [raw];
-    return blocks.map(parseSingleRecipe).filter(recipe => recipe.title && !/^skip$/i.test(recipe.title));
+    const recipeArea = raw.split(/^\s*\\?\[?SHOPPING\]?\s*:?\s*$/im)[0];
+    const matches = [...recipeArea.matchAll(/(?:\\)?===\s*RECIPE\s*===([\s\S]*?)(?:(?:\\)?===\s*END RECIPE\s*===|(?=(?:\\)?===\s*RECIPE\s*===)|$)/gi)];
+    if (matches.length) return matches.map(match => match[1].trim()).filter(Boolean);
+
+    /* Marker-less fallback: some clipboard paths strip the === lines but
+       preserve TITLE:. Split on top-level TITLE fields instead. */
+    const starts = [...recipeArea.matchAll(/^\s*(?:>\s*)?(?:[-*•]\s*)?(?:\*\*|__)?TITLE(?:\*\*|__)?\s*:/gmi)].map(match => match.index);
+    if (starts.length) return starts.map((start, index) => recipeArea.slice(start, starts[index + 1] ?? recipeArea.length).trim()).filter(Boolean);
+    return [recipeArea.trim()].filter(Boolean);
 }
-function parseShoppingText(text) {
-    const lines = String(text || "").split(/\r?\n/);
-    const start = lines.findIndex(line => /^\s*\[?shopping\]?\s*:?\s*$/i.test(line));
-    const end = start >= 0 ? lines.findIndex((line, index) => index > start && /^\s*\[?end shopping\]?\s*$/i.test(line)) : -1;
+function parseRecipeBlocks(text) {
+    const payload = parseMiseAiPayload(text);
+    if (payload?.recipes?.length) return payload.recipes.filter(recipe => recipe.title && !/^skip$/i.test(recipe.title));
+    return legacyRecipeBlocks(text).map(parseSingleRecipe).filter(recipe => recipe.title && !/^skip$/i.test(recipe.title));
+}
+
+function parseShoppingLine(line) {
+    const stripped = String(line || "")
+        .replace(/[\u200b-\u200d\ufeff]/g, "")
+        .replace(/^\s*(?:>\s*)?(?:\\?[-*•]\s*)?/, "")
+        .replace(/\\(?=\[(?:buy|stock)\])/gi, "")
+        .replace(/^\[(?:buy|stock)\]\s*/i, "")
+        .trim();
+    if (!stripped || /^\[?end shopping\]?$/i.test(stripped)) return null;
+    const parts = stripped.split("|").map(part => part.trim());
+    const name = String(parts[0] || "").trim();
+    if (!name) return null;
+    if (parts.length === 1) return { name, quantity: 1, unit: "", reason: "" };
+    const amount = parseAmountText(parts[1]);
+    return {
+        name,
+        quantity: amount.quantity == null ? 1 : amount.quantity,
+        unit: amount.unit || "",
+        reason: parts.slice(2).join(" | ").trim()
+    };
+}
+function parseShoppingItems(text) {
+    const payload = parseMiseAiPayload(text);
+    if (payload?.shopping) return dedupeShoppingItems(payload.shopping);
+    const raw = normaliseRecipeImportText(text);
+    const lines = raw.split(/\r?\n/);
+    const start = lines.findIndex(line => /^\s*\\?\[?shopping\]?\s*:?\s*$/i.test(line));
+    const end = start >= 0 ? lines.findIndex((line, index) => index > start && /^\s*\\?\[?end shopping\]?\s*$/i.test(line)) : -1;
+    if (start < 0 && /(?:===\s*RECIPE|^\s*TITLE\s*:|^\s*INGREDIENTS\s*:|^\s*STEPS\s*:)/im.test(raw)) return [];
     const chosen = start >= 0 ? lines.slice(start + 1, end > start ? end : undefined) : lines;
-    return Array.from(new Set(chosen.flatMap(line => line.split(",")).map(line => line.replace(/^\s*[-*•]\s*/, "").replace(/^\[(buy|stock)\]\s*/i, "").split("|")[0].trim()).filter(Boolean)));
+    return dedupeShoppingItems(chosen.map(parseShoppingLine).filter(Boolean));
 }
+function dedupeShoppingItems(items) {
+    const result = [];
+    for (const item of items || []) {
+        const key = normalise(item?.name);
+        if (!key) continue;
+        const existing = result.find(entry => normalise(entry.name) === key);
+        if (existing) {
+            const sameUnit = normaliseUnit(existing.unit) === normaliseUnit(item.unit);
+            if (sameUnit) existing.quantity = roundQuantity(Number(existing.quantity || 0) + Number(item.quantity || 0));
+            if (!existing.unit && item.unit) existing.unit = item.unit;
+            if (!existing.reason && item.reason) existing.reason = item.reason;
+        } else result.push({ name: String(item.name).trim(), quantity: Number(item.quantity || 1), unit: String(item.unit || ""), reason: String(item.reason || "") });
+    }
+    return result;
+}
+function parseShoppingText(text) { return parseShoppingItems(text).map(item => item.name); }
 function usageCount(name, recipes) { return recipes.reduce((sum, recipe) => sum + (ingredientNames(recipe).some(ingredient => matchesName(ingredient, name)) ? 1 : 0), 0); }
 
 function analyticsFor(state, name) { return state.analytics[normalise(name)] || { shoppingAdds: 0, stockAdds: 0, stockedAt: [] }; }
@@ -353,38 +525,53 @@ OPTIONS FOR NOW
 4. WILD CARD — a clever cuisine or combination
 
 PREP AHEAD
-5. PREP AHEAD — include this when worthwhile. Suggest something I can start now but deliberately finish tomorrow or later because long inactive time improves it: for example a 4–48 hour marinade, overnight brine/soak/proof, slow ferment/pickle, cured preparation, or another long-resting technique. Prefer stock that is open, near expiry, or otherwise likely to benefit from being used soon. Make it tempting enough that, while choosing tonight's meal, I might save this recipe for the next day. Clearly separate WHAT TO DO NOW from HOW TO FINISH LATER. Give refrigeration/storage instructions and conservative food-safety timing; never suggest leaving raw meat, fish, dairy, or other perishable food at room temperature for a long rest. If no sensible long-prep recipe fits the stock, say PREP AHEAD: SKIP rather than forcing one.
+5. PREP AHEAD — include this when worthwhile. Suggest something I can start now but deliberately finish tomorrow or later because long inactive time improves it: for example a 4–48 hour marinade, overnight brine/soak/proof, slow ferment/pickle, cured preparation, or another long-resting technique. Prefer stock that is open, near expiry, or otherwise likely to benefit from being used soon. Make it tempting enough that, while choosing tonight's meal, I might save this recipe for the next day. Clearly separate WHAT TO DO NOW from HOW TO FINISH LATER. Give refrigeration/storage instructions and conservative food-safety timing; never suggest leaving raw meat, fish, dairy, or other perishable food at room temperature for a long rest. If no sensible long-prep recipe fits the stock, omit the prep-ahead recipe rather than forcing one.
 
 For every proposed recipe include cuisine, tags, active/total time, exact measurable amounts, substitutions, heat levels and visual doneness cues. Prioritise near-expiry items and refrigerated leftovers first, then opened ingredients and genuinely fresh produce. Treat vegetables, leafy greens, mushrooms, fresh fruit, fresh herbs and similar short-lived ingredients as use-soon by default even when they have no urgency tag. Leftovers are already cooked/prepared: use them as a ready-made component, side, base, filling or repurposed ingredient, and only describe reheating/crisping/seasoning/combining steps that are still needed. Frozen leftovers are available but are not automatically urgent; flag appropriate thawing/reheating. Never assume an unlisted ingredient is available.
 
-IMPORTANT FOR STOCK TRACKING: for every [STOCK] ingredient, copy its stock name exactly. Whenever practical, express the recipe amount in the same unit shown in CURRENT STOCK, or a directly convertible metric unit (g↔kg, ml↔cl↔dl↔L). Avoid vague amounts such as "some" for stock ingredients when a realistic quantity can be stated.
+IMPORTANT FOR STOCK TRACKING: for every ingredient whose source is "stock", copy its CURRENT STOCK name exactly. Whenever practical, express the recipe amount in the same unit shown in CURRENT STOCK, or a directly convertible metric unit (g↔kg, ml↔cl↔dl↔L). Avoid vague amounts such as "some" when a realistic quantity can be stated.
 
-Use this exact machine-readable format for every recipe you do provide:
-=== RECIPE ===
-TITLE: Recipe name
-MODE: Fast | Medium | Cook once | Wild card | Prep ahead
-CUISINE: cuisine or style
-TAGS: 2-5 short comma-separated tags such as quick, Portuguese, pasta, freezer-friendly, leftover-friendly
-SERVINGS: number
-ACTIVE MINUTES: number
-TOTAL MINUTES: number
-LEAD TIME: none | X hours | X days
-INGREDIENTS:
-- [STOCK] Exact stock item name | numeric amount | unit
-- [BUY] Missing ingredient name | numeric amount | unit
-STEPS:
-1. One complete actionable step, including heat/time/doneness cues where relevant.
-2. Next complete step.
-=== END RECIPE ===
+IMPORTANT OUTPUT FORMAT: return exactly one valid JSON object and nothing else. Do not wrap it in a Markdown code fence. Do not add commentary before or after it. Use ordinary JSON double quotes and no trailing commas.
 
-Use an empty unit after the final | for countable ingredients with no unit. For PREP AHEAD, the numbered steps must explicitly say what I should do now, how to store/rest it, and what I should do tomorrow/later.
+Use this exact top-level shape:
+{
+  "format": "mise-ai-v1",
+  "recipes": [
+    {
+      "title": "Recipe name",
+      "mode": "Fast | Medium | Cook once | Wild card | Prep ahead",
+      "cuisine": "cuisine or style",
+      "tags": ["2-5", "short", "tags"],
+      "servings": 1,
+      "activeMinutes": 10,
+      "totalMinutes": 25,
+      "leadTime": "none | X hours | X days",
+      "ingredients": [
+        {"source": "stock", "name": "Exact stock item name", "quantity": 100, "unit": "g"},
+        {"source": "buy", "name": "Missing ingredient name", "quantity": 1, "unit": ""}
+      ],
+      "steps": [
+        "One complete actionable step with heat/time/doneness cues where relevant.",
+        "Next complete step."
+      ]
+    }
+  ],
+  "shopping": [
+    {"name": "Ingredient", "quantity": 1, "unit": "bunch", "reason": "Concise explanation of the extra recipe families it unlocks"}
+  ]
+}
 
-Then provide a strategic shopping-unlock list. This is NOT a combined list of every [BUY] ingredient used above. Recommend only 0–3 additional ingredients total, chosen as a set to unlock the maximum number and variety of realistic extra recipes when combined with CURRENT STOCK. Think of this as a small set-cover problem: prefer ingredients that complete many near-miss meals, avoid redundant picks that unlock mostly the same dishes, and favour versatile ingredients that connect strongly to several things I already have. Do not recommend an item merely because it is a generally useful staple. If buying nothing would meaningfully improve recipe coverage, return an empty block.
+JSON RULES:
+- Return four recipes for now, plus the prep-ahead recipe only when it is genuinely worthwhile. If prep-ahead should be skipped, simply omit it from recipes; do not add a fake recipe named SKIP.
+- For every stock ingredient, source must be "stock" and name must copy the CURRENT STOCK name exactly.
+- Missing ingredients use source "buy".
+- quantity must be a JSON number, never words. unit is a short string and can be empty for countable items.
+- Whenever practical, use the stock item's own unit or a directly convertible metric unit (g↔kg, ml↔cl↔dl↔L).
+- steps must be a JSON array with one complete instruction per entry. For PREP AHEAD, explicitly include what to do now, how to refrigerate/store/rest it, and how to finish later.
+- Put substitutions in the relevant step when useful.
 
-[SHOPPING]
-- Item name | practical quantity | concise reason naming the kinds of recipes it unlocks
-[END SHOPPING]
-Use 0, 1, 2, or 3 lines only inside [SHOPPING]. No commentary inside marked blocks.`;
+STRATEGIC SHOPPING UNLOCK:
+The shopping array is NOT every missing ingredient from the recipes. It is a separate strategic list of only 0-3 additional ingredients total, chosen together to unlock the maximum number and variety of realistic extra recipes when combined with CURRENT STOCK. Think of it as a small set-cover problem: prefer ingredients that complete many near-miss meals, avoid redundant picks that unlock mostly the same dishes, and favour ingredients that connect strongly to several things already in stock. Do not recommend something merely because it is a generally useful staple. If buying nothing meaningfully improves recipe coverage, return an empty shopping array.`;
 }
 
 function migrateLegacyStatuses(state) {
@@ -398,11 +585,31 @@ function migrateLegacyStatuses(state) {
             return { ...rest, statuses, increment: itemIncrement(item) };
         }),
         recipes: (Array.isArray(state.recipes) ? state.recipes : []).map((recipe, index) => {
-            if (recipe && Array.isArray(recipe.ingredients) && recipe.ingredients.some(value => value && typeof value === "object")) {
-                return { ...recipe, id: String(recipe.id || `recipe-${index}`), ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : parseSteps(recipe.text || ""), tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : [], createdAt: Number(recipe.createdAt || Date.now()), timesCooked: Number(recipe.timesCooked || 0), lastCookedAt: recipe.lastCookedAt || null };
-            }
-            const parsed = parseSingleRecipe(recipe?.text || `TITLE: ${recipe?.title || "Recipe"}\nINGREDIENTS:\n${(recipe?.ingredients || []).map(name => `- ${name}`).join("\n")}\nSTEPS:`);
-            return { ...parsed, id: String(recipe?.id || `recipe-${index}`), title: String(recipe?.title || parsed.title), createdAt: Number(recipe?.createdAt || Date.now()) };
+            const fallbackText = recipe?.text || `TITLE: ${recipe?.title || "Recipe"}\nINGREDIENTS:\n${(recipe?.ingredients || []).map(name => `- ${name}`).join("\n")}\nSTEPS:`;
+            const reparsed = parseSingleRecipe(fallbackText);
+            const existingIngredients = recipeIngredientObjects(recipe);
+            const existingSteps = Array.isArray(recipe?.steps) ? recipe.steps.map(String).filter(Boolean) : [];
+            const existingTags = Array.isArray(recipe?.tags) ? recipe.tags.map(String).filter(Boolean) : [];
+            /* Repair recipes imported by older parsers. Preserve IDs/history,
+               but recover missing ingredients/steps/metadata from raw text. */
+            return {
+                ...reparsed, ...recipe,
+                id: String(recipe?.id || `recipe-${index}`),
+                title: String(recipe?.title || reparsed.title),
+                mode: String(recipe?.mode || reparsed.mode || ""),
+                cuisine: String(recipe?.cuisine || reparsed.cuisine || ""),
+                tags: existingTags.length ? existingTags : reparsed.tags,
+                servings: Number(recipe?.servings || reparsed.servings) || null,
+                activeMinutes: Number(recipe?.activeMinutes || reparsed.activeMinutes) || null,
+                totalMinutes: Number(recipe?.totalMinutes || reparsed.totalMinutes) || null,
+                leadTime: String(recipe?.leadTime || reparsed.leadTime || "none"),
+                ingredients: existingIngredients.length ? existingIngredients : reparsed.ingredients,
+                steps: existingSteps.length ? existingSteps : reparsed.steps,
+                text: String(recipe?.text || reparsed.text || ""),
+                createdAt: Number(recipe?.createdAt || Date.now()),
+                timesCooked: Number(recipe?.timesCooked || 0),
+                lastCookedAt: recipe?.lastCookedAt || null
+            };
         })
     };
 }

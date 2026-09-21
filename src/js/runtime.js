@@ -75,9 +75,14 @@ function renderRoot(){if(!__root)return;const active=document.activeElement;cons
     else{morphNode(__root.firstChild,dom);while(__root.childNodes.length>1)__root.removeChild(__root.lastChild)}
     if(typeof refreshLucideIcons==="function")refreshLucideIcons();cleanupUnused();
     let focusTarget=activePath?nodeForPath(__root,activePath):null;
-    if(focusTarget&&document.activeElement!==focusTarget){try{focusTarget.focus({preventScroll:true})}catch{}}
-    if(focusTarget&&selection&&typeof focusTarget.setSelectionRange==="function"&&selection[0]!=null){try{focusTarget.setSelectionRange(selection[0],selection[1],selection[2]||"none")}catch{}}
-    else if(__autoFocus){const autoPath=__autoFocus.dataset?.vpath;const auto=autoPath?nodeForPath(__root,autoPath):null;try{auto?.focus()}catch{}}
+    if(focusTarget){
+        if(document.activeElement!==focusTarget){try{focusTarget.focus({preventScroll:true})}catch{}}
+        if(selection&&typeof focusTarget.setSelectionRange==="function"&&selection[0]!=null){try{focusTarget.setSelectionRange(selection[0],selection[1],selection[2]||"none")}catch{}}
+    }else if(__autoFocus){
+        /* autoFocus is only for first mount. Never let it steal focus from an
+           existing control (number inputs do not expose selectionStart). */
+        const autoPath=__autoFocus.dataset?.vpath;const auto=autoPath?nodeForPath(__root,autoPath):null;try{auto?.focus()}catch{}
+    }
     runEffects()}
 function createRoot(el){return{render(vnode){__root=el;__rootVNode=vnode;renderRoot()}}}
 function safeUuid(){return"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,c=>{const r=Math.random()*16|0,v=c==="x"?r:(r&3|8);return v.toString(16)})}

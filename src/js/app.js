@@ -107,8 +107,15 @@ function App() {
     const stockChecked = () => { const checked = state.shopping.filter(i => i.checked); checked.forEach(stockShoppingItem); notify(`${checked.length} item${checked.length === 1 ? "" : "s"} stocked`); };
     const saveRecipe = () => {
         if (!recipeDraft.trim()) return;
-        const recipes = parseRecipeBlocks(recipeDraft);
-        if (!recipes.length) { notify("No recipe found"); return; }
+        const parsed = parseRecipeBlocks(recipeDraft);
+        if (!parsed.length) { notify("No recipe found in that reply"); return; }
+        const recipes = parsed.filter(recipe => recipe.ingredients?.length && recipe.steps?.length);
+        const incomplete = parsed.filter(recipe => !recipe.ingredients?.length || !recipe.steps?.length);
+        if (!recipes.length) {
+            const names = incomplete.slice(0, 2).map(recipe => recipe.title).filter(Boolean).join(", ");
+            notify(`Could not parse ingredients + steps${names ? ` for ${names}` : ""}`);
+            return;
+        }
         setState(current => ({
             ...current,
             recipes: [...recipes, ...current.recipes],
@@ -117,9 +124,44 @@ function App() {
         setRecipeDraft("");
         setShowRecipeImport(false);
         setSelectedRecipeId(recipes[0].id);
-        notify(`${recipes.length} recipe${recipes.length === 1 ? "" : "s"} imported`);
+        notify(incomplete.length ? `${recipes.length} imported · ${incomplete.length} skipped` : `${recipes.length} recipe${recipes.length === 1 ? "" : "s"} imported`);
     };
-    const importShopping = () => { const names = parseShoppingText(shoppingImport); names.forEach(name => addToShopping(name, "import")); setShoppingImport(""); setShowImport(false); notify(`${names.length} item${names.length === 1 ? "" : "s"} imported`); };
+    const importShopping = () => {
+        const items = parseShoppingItems(shoppingImport);
+        if (!items.length) { notify("No shopping items found in that reply"); return; }
+        setState(current => {
+            let shopping = [...current.shopping];
+            let analytics = current.analytics;
+            const activities = [];
+            const now = Date.now();
+            for (const incoming of items) {
+                const existing = shopping.find(item => matchesName(item.name, incoming.name));
+                if (existing) {
+                    shopping = shopping.map(item => {
+                        if (item.id !== existing.id) return item;
+                        const existingUnit = normaliseUnit(item.unit);
+                        const incomingUnit = normaliseUnit(incoming.unit);
+                        let quantity = Number(item.quantity || 0);
+                        let unit = item.unit || incoming.unit || "";
+                        if (!existingUnit || !incomingUnit || existingUnit === incomingUnit) quantity = roundQuantity(quantity + Number(incoming.quantity || 1));
+                        else {
+                            const converted = convertQuantity(Number(incoming.quantity || 1), incoming.unit, item.unit);
+                            if (converted != null) quantity = roundQuantity(quantity + converted);
+                        }
+                        return { ...item, quantity: Math.max(1, quantity), unit, checked: false, addedAt: now, source: "AI import" };
+                    });
+                } else {
+                    shopping.unshift({ id: uuid(), name: incoming.name.trim(), quantity: Number(incoming.quantity || 1), unit: incoming.unit || "", checked: false, addedAt: now, source: "AI import" });
+                }
+                analytics = bumpAnalytics({ ...current, analytics }, incoming.name, "shop", now);
+                activities.push(activity("shop", `${incoming.name} imported to shopping`));
+            }
+            return { ...current, shopping, analytics, activity: [...activities, ...current.activity].slice(0, 100) };
+        });
+        setShoppingImport("");
+        setShowImport(false);
+        notify(`${items.length} item${items.length === 1 ? "" : "s"} imported`);
+    };
     const smart = useMemo(() => smartRecommendations(state), [state]);
     const recent = useMemo(() => recentShopping(state), [state]);
     const recipeStars = useMemo(() => topRecipeItems(state), [state]);
@@ -360,9 +402,9 @@ function App() {
                             "Stock bought"))),
                 showImport && h("div", { className: "import-panel" },
                     h("div", null,
-                        h("b", null, "Paste the [SHOPPING] block"),
-                        h("p", null, "Names before the first | are imported. Duplicates increase quantity.")),
-                    h("textarea", { value: shoppingImport, onChange: e => setShoppingImport(e.target.value), placeholder: '[SHOPPING]\n- Onions | 3 | versatile base\n- Garlic | 1 bulb | more flavour\n[END SHOPPING]' }),
+                        h("b", null, "Paste the AI reply or shopping block"),
+                        h("p", null, "Mise reads the current JSON format and the older [SHOPPING] format. Quantities and units are kept when present.")),
+                    h("textarea", { value: shoppingImport, onChange: e => setShoppingImport(e.target.value), placeholder: '{\n  "format": "mise-ai-v1",\n  "shopping": [\n    {"name":"Fresh coriander","quantity":1,"unit":"bunch","reason":"unlocks curries, rice and salads"}\n  ]\n}' }),
                     h("button", { className: "primary-button", disabled: !shoppingImport.trim(), onClick: importShopping },
                         h(ListPlus, null),
                         "Add all")),
@@ -457,8 +499,11 @@ function App() {
                         h("span", null,
                             h(Bot, null),
                             "Cooking prompt"),
-                        h("small", null, "Generated locally")),
-                    h("pre", null, prompt)))),
+                        h("div", { className: "prompt-paper-actions" },
+                            h("small", null, "Generated locally"),
+                            h("button", { className: "prompt-copy-top", onClick: copyPrompt, title: "Copy cooking prompt" }, h(Clipboard, null), "Copy"))),
+                    h("pre", null, prompt))),
+            tab === "cook" && h("button", { className: "copy-prompt-floating", onClick: copyPrompt, title: "Copy cooking prompt", "aria-label": "Copy cooking prompt" }, h(Clipboard, null), h("span", null, "Copy prompt"))),
         h("nav", { className: "mobile-nav", "aria-label": "Main navigation" },
             h(NavButton, { active: tab === "stock", onClick: () => setTab("stock"), icon: h(Box, null), label: "Stock" }),
             h(NavButton, { active: tab === "shopping", onClick: () => setTab("shopping"), icon: h(ShoppingBasket, null), label: "Shop", count: state.shopping.length }),
@@ -523,8 +568,8 @@ function App() {
                     h("small", null, "Deletion is kept here to avoid accidental taps on stock cards.")))),
         showRecipeImport && h(Modal, { title: "Import recipe", onClose: () => setShowRecipeImport(false), wide: true },
             h("div", { className: "recipe-import-modal" },
-                h("p", null, "Paste one recipe, or paste several === RECIPE === blocks at once. Mise extracts tags, timing, ingredients and steps into separate recipe cards."),
-                h("textarea", { autoFocus: true, value: recipeDraft, onChange: e => setRecipeDraft(e.target.value), placeholder: '=== RECIPE ===\nTITLE: Tomato pesto pasta\nMODE: Fast\nCUISINE: Italian\nTAGS: quick, pasta, vegetarian\nSERVINGS: 1\nACTIVE MINUTES: 10\nTOTAL MINUTES: 20\nLEAD TIME: none\nINGREDIENTS:\n- [STOCK] Pasta | 100 | g\n- [STOCK] Pesto sauce | 2 | tbsp\nSTEPS:\n1. Cook the pasta until al dente.\n2. Toss with pesto and serve.\n=== END RECIPE ===' }),
+                h("p", null, "Paste the full Mise AI reply. The current JSON format is preferred, and older === RECIPE === replies are still supported."),
+                h("textarea", { autoFocus: true, value: recipeDraft, onChange: e => setRecipeDraft(e.target.value), placeholder: '{\n  "format": "mise-ai-v1",\n  "recipes": [\n    {\n      "title": "Tomato pesto pasta",\n      "mode": "Fast",\n      "ingredients": [{"source":"stock","name":"Pasta","quantity":100,"unit":"g"}],\n      "steps": ["Cook the pasta until al dente."]\n    }\n  ]\n}' }),
                 h("div", { className: "modal-actions" },
                     h("button", { className: "soft-button", onClick: () => setShowRecipeImport(false) }, "Cancel"),
                     h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
@@ -580,6 +625,7 @@ function ShoppingRow({ item, onCheck, onAdjust, onStock, onDelete }) { return h(
     h("div", { className: "shopping-name" },
         h("b", null, item.name),
         h("small", null,
+            item.unit ? `${item.unit} · ` : "",
             item.source,
             " \u00B7 ",
             timeLabel(item.addedAt))),
