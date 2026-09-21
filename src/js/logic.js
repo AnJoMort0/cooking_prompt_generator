@@ -38,9 +38,9 @@ function smartRecommendations(state) {
             score += 100;
             reasons.push("Out of stock");
         }
-        else if (item?.status === "low") {
-            score += 78;
-            reasons.push("Running low");
+        else if (item?.status === "expiring") {
+            score = -1000;
+            reasons.push("Use before expiry");
         }
         if (recipes) {
             score += Math.min(48, recipes * 14);
@@ -60,7 +60,7 @@ function smartRecommendations(state) {
             score -= 35;
         if (!reasons.length)
             reasons.push("Useful pantry unlock");
-        return { name, score, reasons: reasons.slice(0, 2), source: item?.status === "out" || item?.status === "low" ? "restock" : "smart" };
+        return { name, score, reasons: reasons.slice(0, 2), source: item?.status === "out" ? "restock" : "smart" };
     }).filter(r => r.score > 5).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)).slice(0, 8);
 }
 function recentShopping(state) { return [...state.shopping].sort((a, b) => b.addedAt - a.addedAt).slice(0, 5); }
@@ -83,7 +83,7 @@ function inferCategory(name, categories, stock) {
     return null;
 }
 function makePrompt(state, tone) {
-    const available = state.stock.filter(i => i.quantity > 0 && i.status !== "out").map(i => `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""}${i.status !== "ready" ? `, ${i.status}` : ""})`).join(", ");
+    const available = state.stock.filter(i => i.quantity > 0 && i.status !== "out").map(i => { const status = i.status === "expiring" ? "near expiry" : i.status; return `${i.name} (${i.quantity}${i.unit ? ` ${i.unit}` : ""}${status !== "ready" ? `, ${status}` : ""})`; }).join(", ");
     const favourites = topRecipeItems(state).map(x => `${x.item.name} (${x.count} saved recipes)`).join(", ") || "No history yet";
     return `Act as my practical, inventive home cook. Use my real stock and return four clearly different recipes I could cook now, plus one PREP AHEAD recipe when the stock genuinely supports it. The prep-ahead recipe is intentionally allowed to be for tomorrow or later rather than tonight.
 
@@ -109,9 +109,9 @@ OPTIONS FOR NOW
 4. WILD CARD — a clever cuisine or combination
 
 PREP AHEAD
-5. PREP AHEAD — include this when worthwhile. Suggest something I can start now but deliberately finish tomorrow or later because long inactive time improves it: for example a 4–48 hour marinade, overnight brine/soak/proof, slow ferment/pickle, cured preparation, or another long-resting technique. Prefer stock that is open, low, or likely to benefit from being used soon. Make it tempting enough that, while choosing tonight's meal, I might save this recipe for the next day. Clearly separate WHAT TO DO NOW from HOW TO FINISH LATER. Give refrigeration/storage instructions and conservative food-safety timing; never suggest leaving raw meat, fish, dairy, or other perishable food at room temperature for a long rest. If no sensible long-prep recipe fits the stock, say PREP AHEAD: SKIP rather than forcing one.
+5. PREP AHEAD — include this when worthwhile. Suggest something I can start now but deliberately finish tomorrow or later because long inactive time improves it: for example a 4–48 hour marinade, overnight brine/soak/proof, slow ferment/pickle, cured preparation, or another long-resting technique. Prefer stock that is open, near expiry, or otherwise likely to benefit from being used soon. Make it tempting enough that, while choosing tonight's meal, I might save this recipe for the next day. Clearly separate WHAT TO DO NOW from HOW TO FINISH LATER. Give refrigeration/storage instructions and conservative food-safety timing; never suggest leaving raw meat, fish, dairy, or other perishable food at room temperature for a long rest. If no sensible long-prep recipe fits the stock, say PREP AHEAD: SKIP rather than forcing one.
 
-For every proposed recipe include cuisine, active/total time, exact amounts, substitutions, heat levels and visual doneness cues. Prioritise open and low items. Flag thawing. Never assume an unlisted ingredient is available.
+For every proposed recipe include cuisine, active/total time, exact amounts, substitutions, heat levels and visual doneness cues. Prioritise open and near-expiry items. Flag thawing. Never assume an unlisted ingredient is available.
 
 Use this exact machine-readable format for every recipe you do provide:
 === RECIPE ===
@@ -137,13 +137,18 @@ Then provide a strategic shopping-unlock list. This is NOT a combined list of ev
 Use 0, 1, 2, or 3 lines only inside [SHOPPING]. No commentary inside marked blocks.`;
 }
 
+function migrateLegacyStatuses(state) {
+    if (!state || !Array.isArray(state.stock)) return state;
+    return { ...state, stock: state.stock.map(item => ({ ...item, status: item.status === "low" ? "ready" : (item.status || "ready") })) };
+}
+
 function loadState() {
     try {
         const saved = localStorage.getItem(STORAGE_KEY);
         if (saved) {
             const parsed = JSON.parse(saved);
             if (parsed.version === 1)
-                return parsed;
+                return migrateLegacyStatuses(parsed);
         }
     }
     catch { }
@@ -153,7 +158,7 @@ function loadState() {
         const oldShopping = JSON.parse(localStorage.getItem("mise-shopping") || "null");
         const oldRecipes = JSON.parse(localStorage.getItem("mise-recipes") || "null");
         if (oldItems) {
-            state.stock = oldItems.map((item, index) => { const category = defaultCategories.find(c => normalise(c.name) === normalise(String(item.category || ""))); return { id: String(item.id || `migrated-${index}`), name: String(item.name || "Ingredient"), quantity: Number(item.quantity || 0), unit: String(item.unit || ""), categoryId: category?.id || null, status: (item.status === "fresh" ? "ready" : item.status || "ready"), createdAt: Date.now(), updatedAt: Date.now() }; });
+            state.stock = oldItems.map((item, index) => { const category = defaultCategories.find(c => normalise(c.name) === normalise(String(item.category || ""))); return { id: String(item.id || `migrated-${index}`), name: String(item.name || "Ingredient"), quantity: Number(item.quantity || 0), unit: String(item.unit || ""), categoryId: category?.id || null, status: (item.status === "fresh" || item.status === "low" ? "ready" : item.status || "ready"), createdAt: Date.now(), updatedAt: Date.now() }; });
         }
         if (oldShopping) {
             state.shopping = oldShopping.map((item, index) => ({ id: String(item.id || `shop-${index}`), name: String(item.name || "Item"), quantity: 1, unit: "", checked: Boolean(item.done), addedAt: Date.now() - index, source: "manual" }));
@@ -173,4 +178,4 @@ function timeLabel(timestamp) { return humanAge(timestamp); }
 function newShoppingItem(name, source) { return { id: uuid(), name: name.trim(), quantity: 1, unit: "", checked: false, addedAt: Date.now(), source }; }
 
 const palette = ["#67a64a", "#d15336", "#5f91c9", "#c3903f", "#a45f91", "#e17833", "#3b9a9a", "#7b6bd1", "#db4f83"];
-const statusButtons = [{ status: "frozen", label: "Frozen", icon: Snowflake }, { status: "open", label: "Open", icon: PackageOpen }, { status: "low", label: "Low", icon: Gauge }];
+const statusButtons = [{ status: "frozen", label: "Frozen", icon: Snowflake }, { status: "open", label: "Open", icon: PackageOpen }, { status: "expiring", label: "Near expiry", icon: CalendarClock }];

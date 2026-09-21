@@ -57,9 +57,9 @@ function App() {
     const addToShopping = (name, source = "manual") => setState(current => { const existing = current.shopping.find(item => matchesName(item.name, name)); const shopping = existing ? current.shopping.map(item => item.id === existing.id ? { ...item, quantity: item.quantity + 1, addedAt: Date.now(), checked: false } : item) : [newShoppingItem(name, source), ...current.shopping]; return { ...current, shopping, analytics: bumpAnalytics(current, name, "shop"), activity: [activity("shop", `${name} added to shopping`), ...current.activity].slice(0, 100) }; });
     const adjustStock = (id, amount) => setState(current => ({ ...current, stock: current.stock.map(item => { if (item.id !== id)
             return item; const quantity = Math.max(0, Math.round((item.quantity + amount) * 10) / 10); return { ...item, quantity, status: quantity === 0 ? "out" : item.status === "out" ? "ready" : item.status, updatedAt: Date.now() }; }) }));
-    const toggleStatus = (id, status) => setState(current => ({ ...current, stock: current.stock.map(item => item.id === id ? { ...item, quantity: item.quantity || 1, status: item.status === status ? "ready" : status, updatedAt: Date.now() } : item), activity: [activity("status", `${current.stock.find(i => i.id === id)?.name || "Item"} marked ${status}`), ...current.activity].slice(0, 100) }));
+    const toggleStatus = (id, status) => setState(current => ({ ...current, stock: current.stock.map(item => item.id === id ? { ...item, quantity: item.quantity || 1, status: item.status === status ? "ready" : status, updatedAt: Date.now() } : item), activity: [activity("status", `${current.stock.find(i => i.id === id)?.name || "Item"} marked ${status === "expiring" ? "near expiry" : status}`), ...current.activity].slice(0, 100) }));
     const adjustShopping = (id, amount) => setState(current => ({ ...current, shopping: current.shopping.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + amount) } : item) }));
-    const stockShoppingItem = (shoppingItem) => setState(current => { const existing = current.stock.find(item => matchesName(item.name, shoppingItem.name)); const stock = existing ? current.stock.map(item => item.id === existing.id ? { ...item, quantity: Math.round((item.quantity + shoppingItem.quantity) * 10) / 10, status: item.status === "out" || item.status === "low" ? "ready" : item.status, updatedAt: Date.now() } : item) : [{ id: uuid(), name: shoppingItem.name, quantity: shoppingItem.quantity, unit: shoppingItem.unit, categoryId: inferCategory(shoppingItem.name, current.categories, current.stock), status: "ready", createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock]; return { ...current, stock, shopping: current.shopping.filter(item => item.id !== shoppingItem.id), analytics: bumpAnalytics(current, shoppingItem.name, "stock"), activity: [activity("stock", `${shoppingItem.quantity} ${shoppingItem.name} moved into stock`), ...current.activity].slice(0, 100) }; });
+    const stockShoppingItem = (shoppingItem) => setState(current => { const existing = current.stock.find(item => matchesName(item.name, shoppingItem.name)); const stock = existing ? current.stock.map(item => item.id === existing.id ? { ...item, quantity: Math.round((item.quantity + shoppingItem.quantity) * 10) / 10, status: item.status === "out" ? "ready" : item.status, updatedAt: Date.now() } : item) : [{ id: uuid(), name: shoppingItem.name, quantity: shoppingItem.quantity, unit: shoppingItem.unit, categoryId: inferCategory(shoppingItem.name, current.categories, current.stock), status: "ready", createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock]; return { ...current, stock, shopping: current.shopping.filter(item => item.id !== shoppingItem.id), analytics: bumpAnalytics(current, shoppingItem.name, "stock"), activity: [activity("stock", `${shoppingItem.quantity} ${shoppingItem.name} moved into stock`), ...current.activity].slice(0, 100) }; });
     const stockChecked = () => { const checked = state.shopping.filter(i => i.checked); checked.forEach(stockShoppingItem); notify(`${checked.length} item${checked.length === 1 ? "" : "s"} stocked`); };
     const saveRecipe = () => { if (!recipeDraft.trim())
         return; const recipe = { id: uuid(), title: recipeTitle(recipeDraft), text: recipeDraft.trim(), ingredients: parseRecipeIngredients(recipeDraft), createdAt: Date.now() }; setState(current => ({ ...current, recipes: [recipe, ...current.recipes], activity: [activity("recipe", `${recipe.title} saved`), ...current.activity].slice(0, 100) })); setRecipeDraft(""); notify("Recipe scanned"); };
@@ -68,7 +68,7 @@ function App() {
     const recent = useMemo(() => recentShopping(state), [state]);
     const recipeStars = useMemo(() => topRecipeItems(state), [state]);
     const frequent = useMemo(() => frequentBuys(state), [state]);
-    const useFirst = useMemo(() => state.stock.filter(item => item.quantity > 0 && (item.status === "open" || item.status === "low")).sort((a, b) => (a.status === "low" ? 0 : 1) - (b.status === "low" ? 0 : 1) || a.updatedAt - b.updatedAt), [state.stock]);
+    const useFirst = useMemo(() => state.stock.filter(item => item.quantity > 0 && (item.status === "open" || item.status === "expiring")).sort((a, b) => (a.status === "expiring" ? 0 : 1) - (b.status === "expiring" ? 0 : 1) || a.updatedAt - b.updatedAt), [state.stock]);
     const visibleStock = useMemo(() => state.stock.filter(item => (categoryFilter === "all" || categoryFilter === "unsorted" ? categoryFilter !== "unsorted" || !item.categoryId : item.categoryId === categoryFilter) && (statusFilter === "all" || item.status === statusFilter) && normalise(item.name).includes(normalise(query))).sort((a, b) => (a.status === "out" ? 1 : 0) - (b.status === "out" ? 1 : 0) || a.name.localeCompare(b.name)), [state.stock, categoryFilter, statusFilter, query]);
     const prompt = useMemo(() => makePrompt(state, tone), [state, tone]);
     const addStock = (event) => { event.preventDefault(); if (!newItem.name.trim())
@@ -145,7 +145,7 @@ function App() {
         const parsed = JSON.parse(await file.text());
         if (parsed.version !== 1 || !Array.isArray(parsed.stock) || !Array.isArray(parsed.categories))
             throw new Error();
-        setState(parsed);
+        setState(migrateLegacyStatuses(parsed));
         setShowSettings(false);
         notify("Backup restored");
     }
@@ -186,7 +186,7 @@ function App() {
                             "Your kitchen is",
                             h("br", null),
                             h("em", null, "ready."))),
-                        h("p", null, useFirst[0] ? `${useFirst[0].status === "low" ? "Running low" : "Already open"} · ${usageCount(useFirst[0].name, state.recipes)} saved recipe matches` : "Nothing urgent. Explore your stock or build a cooking brief.")),
+                        h("p", null, useFirst[0] ? `${useFirst[0].status === "expiring" ? "Near expiry" : "Already open"} · ${usageCount(useFirst[0].name, state.recipes)} saved recipe matches` : "Nothing urgent. Explore your stock or build a cooking brief.")),
                     h("button", { className: "cook-now", onClick: () => setTab("cook") },
                         h("span", null,
                             h(Sparkles, null)),
@@ -194,7 +194,7 @@ function App() {
                         h(ChevronRight, null)),
                     h("div", { className: "signal-orbit" })),
                 h("div", { className: "insight-grid" },
-                    h(Insight, { icon: h(PackageOpen, null), label: "Use first", value: useFirst[0]?.name || "All clear", meta: useFirst.length ? `${useFirst.length} open or low` : "No urgent items" }),
+                    h(Insight, { icon: h(PackageOpen, null), label: "Use first", value: useFirst[0]?.name || "All clear", meta: useFirst.length ? `${useFirst.length} open or near expiry` : "No urgent items" }),
                     h(Insight, { icon: h(BookOpen, null), label: "Recipe magnet", value: recipeStars[0]?.item.name || "Learning…", meta: recipeStars[0] ? `${recipeStars[0].count} saved recipes` : "Save recipes to train this" }),
                     h(Insight, { icon: h(History, null), label: "Restock rhythm", value: frequent[0]?.item.name || "Learning…", meta: frequent[0] ? `Added ${frequent[0].count}× to shopping` : "Shopping history stays here" })),
                 h("div", { className: "section-head" },
@@ -211,9 +211,9 @@ function App() {
                         h("label", { className: "search" },
                             h(Search, null),
                             h("input", { value: query, onChange: e => setQuery(e.target.value), placeholder: "Find ingredient" })),
-                        ["open", "frozen", "low", "out"].map(status => h("button", { className: `filter-button ${statusFilter === status ? "active" : ""}`, key: status, onClick: () => setStatusFilter(statusFilter === status ? "all" : status) },
-                            status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : status === "low" ? h(Gauge, null) : h(X, null),
-                            h("span", null, status))))),
+                        ["open", "frozen", "expiring", "out"].map(status => h("button", { className: `filter-button ${statusFilter === status ? "active" : ""}`, key: status, onClick: () => setStatusFilter(statusFilter === status ? "all" : status), title: status === "expiring" ? "Near expiry" : status, "aria-label": status === "expiring" ? "Near expiry" : status },
+                            status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : status === "expiring" ? h(CalendarClock, null) : h(X, null),
+                            h("span", null, status === "expiring" ? "Near expiry" : status))))),
                 h("div", { className: "category-row" },
                     h("button", { className: `category-filter ${categoryFilter === "all" ? "active" : ""}`, onClick: () => setCategoryFilter("all") },
                         h("span", { className: "category-glyph all-glyph" }, h(Boxes, { size: 16 })),
@@ -356,9 +356,9 @@ function App() {
                     h("select", { value: newItem.categoryId, onChange: e => setNewItem({ ...newItem, categoryId: e.target.value }) },
                         h("option", { value: "" }, "Unsorted"),
                         state.categories.map(c => h("option", { value: c.id, key: c.id }, c.name)))),
-                h("div", { className: "status-picker full" }, ["ready", "open", "frozen", "low"].map(status => h("button", { type: "button", key: status, className: newItem.status === status ? "active" : "", onClick: () => setNewItem({ ...newItem, status }) },
-                    status === "ready" ? h(Check, null) : status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : h(Gauge, null),
-                    status))),
+                h("div", { className: "status-picker full" }, ["ready", "open", "frozen", "expiring"].map(status => h("button", { type: "button", key: status, className: newItem.status === status ? "active" : "", onClick: () => setNewItem({ ...newItem, status }) },
+                    status === "ready" ? h(Check, null) : status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : h(CalendarClock, null),
+                    status === "expiring" ? "Near expiry" : status))),
                 h("button", { className: "primary-button full", type: "submit" },
                     h(PackagePlus, null),
                     "Add ingredient"))),
@@ -378,9 +378,9 @@ function App() {
                     h("select", { value: editingItem.categoryId || "", onChange: e => setEditingItem({ ...editingItem, categoryId: e.target.value }) },
                         h("option", { value: "" }, "Unsorted"),
                         state.categories.map(c => h("option", { value: c.id, key: c.id }, c.name)))),
-                h("div", { className: "status-picker full" }, ["ready", "open", "frozen", "low"].map(status => h("button", { type: "button", key: status, className: editingItem.status === status ? "active" : "", onClick: () => setEditingItem({ ...editingItem, quantity: editingItem.quantity || 1, status }) },
-                    status === "ready" ? h(Check, null) : status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : h(Gauge, null),
-                    status))),
+                h("div", { className: "status-picker full" }, ["ready", "open", "frozen", "expiring"].map(status => h("button", { type: "button", key: status, className: editingItem.status === status ? "active" : "", onClick: () => setEditingItem({ ...editingItem, quantity: editingItem.quantity || 1, status }) },
+                    status === "ready" ? h(Check, null) : status === "open" ? h(PackageOpen, null) : status === "frozen" ? h(Snowflake, null) : h(CalendarClock, null),
+                    status === "expiring" ? "Near expiry" : status))),
                 h("p", { className: "form-hint full" }, "Set quantity to 0 to mark this ingredient out of stock."),
                 h("button", { className: "primary-button full", type: "submit" },
                     h(Pencil, null),
@@ -418,7 +418,7 @@ function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit, onDelete }
             h("h3", null, item.name),
             h("p", null,
                 category?.name || "Unsorted",
-                item.status === "out" ? " · Out of stock" : "")),
+                item.status === "out" ? " · Out of stock" : item.status === "expiring" ? " · Near expiry" : "")),
         (recipes > 0 || shoppingAdds > 0) && h("div", { className: "micro-signals" },
             recipes > 0 && h("span", null,
                 h(BookOpen, null),

@@ -5,7 +5,7 @@
 .signal-card{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;min-height:310px;overflow:hidden;border-radius:34px;background:var(--paprika);padding:clamp(24px,5vw,58px);box-shadow:inset 0 0 0 1px rgb(32 35 30/8%)}.signal-copy{position:relative;z-index:2}.eyebrow{display:inline-flex;align-items:center;gap:6px;margin-bottom:9px;color:var(--paprika);font-size:.74rem;font-weight:950;letter-spacing:.13em}.signal-card .eyebrow{color:#6a2112}.signal-copy h1,.page-title h1,.recipe-import h1,.cook-intro h1{margin:0;font-family:"Arial Black",Impact,sans-serif;font-weight:900;letter-spacing:-.065em}.signal-copy h1{max-width:870px;font-size:clamp(2.65rem,6.8vw,6.4rem);line-height:.91}.signal-copy h1 em{font-style:normal;color:#fff}.signal-copy p{margin:18px 0 0;font-weight:750;color:#682617}.cook-now{position:relative;z-index:2;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;min-width:260px;border-radius:24px;background:var(--ink);padding:10px 16px 10px 10px;color:#fff;box-shadow:0 16px 34px rgb(91 28 11/22%)}.cook-now>span{display:grid;width:54px;height:54px;place-items:center;border-radius:17px;background:var(--lime);color:var(--ink)}.cook-now svg{width:24px;height:24px}.signal-orbit{position:absolute;right:-55px;top:-100px;width:340px;height:340px;border:64px solid rgb(255 255 255/16%);border-radius:50%}
 .insight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:14px 0 32px}.insight-card{display:flex;align-items:center;gap:14px;min-width:0;border:1px solid var(--line);border-radius:20px;background:#fff;padding:16px}.insight-card>span{display:grid;flex:0 0 auto;width:44px;height:44px;place-items:center;border-radius:14px;background:#f0eee8;color:var(--paprika)}.insight-card div{display:grid;min-width:0}.insight-card small{color:var(--muted);font-size:.7rem;font-weight:900;letter-spacing:.08em;text-transform:uppercase}.insight-card b{overflow:hidden;margin-top:2px;font-size:.98rem;text-overflow:ellipsis;white-space:nowrap}.insight-card p{margin:2px 0 0;color:var(--muted);font-size:.75rem}
 .section-head,.page-title{display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.section-head h2{margin:0;font-family:"Arial Black",Impact,sans-serif;font-size:2.2rem;letter-spacing:-.05em}.section-head h2 small{font-family:Inter,system-ui,sans-serif;color:var(--muted);font-size:.85rem;letter-spacing:0}.toolbar{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:7px}.search{display:flex;align-items:center;gap:7px;height:42px;border:1px solid var(--line);border-radius:999px;background:#fff;padding:0 12px;color:#80847b}.search input{width:130px;border:0;outline:0;background:transparent}.filter-button,.category-row button{display:inline-flex;align-items:center;gap:6px;height:42px;border:1px solid var(--line);border-radius:999px;background:#fff;padding:0 12px;color:#666a61;font-size:.8rem;font-weight:850;text-transform:capitalize}.filter-button.active,.category-row button.active{border-color:var(--ink);background:var(--ink);color:#fff}.category-row{display:flex;gap:7px;margin:14px 0;overflow:auto;padding-bottom:2px;scrollbar-width:none}.category-row::-webkit-scrollbar{display:none}.category-row button{white-space:nowrap}.category-row button svg{width:15px;height:15px}.category-row .manage-categories{margin-left:auto;border-style:dashed;color:#41453d}
-.stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:12px}.stock-card{--category:#92958d;display:flex;min-height:224px;flex-direction:column;border:1px solid var(--line);border-top:4px solid var(--category);border-radius:22px;background:#fff;padding:16px;box-shadow:0 3px 0 rgb(31 33 29/3%);transition:.18s transform,.18s box-shadow}.stock-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}.stock-card.out{opacity:.6;filter:saturate(.5)}.stock-card-top{display:flex;align-items:center;justify-content:space-between}.category-mark{display:grid;width:38px;height:38px;place-items:center;border-radius:12px;background:#f4f2ed}.category-mark svg{width:18px;height:18px}.status-actions{display:flex;gap:4px;border-radius:12px;background:#f1efe9;padding:3px}.status-actions button{display:grid;width:32px;height:32px;place-items:center;border-radius:9px;background:transparent;color:#94978f}.status-actions button:hover{background:#fff;color:var(--ink)}.status-actions button.active.frozen{background:#e2effc;color:#286a9d}.status-actions button.active.open{background:#ffedd0;color:#8a5200}.status-actions button.active.low{background:#ffe6df;color:#a33d27}.stock-name h3{margin:18px 0 2px;font-size:1.04rem;letter-spacing:-.02em}.stock-name p{margin:0;color:#888b82;font-size:.78rem;font-weight:700}.micro-signals{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}.micro-signals span{display:inline-flex;align-items:center;gap:4px;border-radius:99px;background:#f2f0ea;padding:4px 7px;color:#676b62;font-size:.68rem;font-weight:800}.micro-signals svg{width:12px;height:12px}.stock-card-bottom{display:flex;align-items:center;gap:7px;margin-top:auto;padding-top:16px}.stock-card-bottom>small{max-width:42px;overflow:hidden;color:var(--muted);font-size:.7rem;text-overflow:ellipsis}.stepper{display:grid;grid-template-columns:32px minmax(36px,auto) 32px;align-items:center;overflow:hidden;border:1px solid var(--line);border-radius:12px}.stepper button{display:grid;height:34px;place-items:center;background:#f5f3ee;color:var(--ink)}.stepper button:hover{background:var(--lime)}.stepper svg{width:14px}.stepper strong{text-align:center;font-size:.85rem}.card-actions{display:flex;gap:4px;margin-left:auto}.card-actions button{display:grid;width:35px;height:35px;place-items:center;border-radius:11px;background:#f0eee8;color:#71756c}.card-actions button:first-child{background:var(--ink);color:#fff}.card-actions button:hover{background:var(--paprika);color:#fff}
+.stock-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(235px,1fr));gap:12px}.stock-card{--category:#92958d;display:flex;min-height:224px;flex-direction:column;border:1px solid var(--line);border-top:4px solid var(--category);border-radius:22px;background:#fff;padding:16px;box-shadow:0 3px 0 rgb(31 33 29/3%);transition:.18s transform,.18s box-shadow}.stock-card:hover{transform:translateY(-2px);box-shadow:var(--shadow)}.stock-card.out{opacity:.6;filter:saturate(.5)}.stock-card-top{display:flex;align-items:center;justify-content:space-between}.category-mark{display:grid;width:38px;height:38px;place-items:center;border-radius:12px;background:#f4f2ed}.category-mark svg{width:18px;height:18px}.status-actions{display:flex;gap:4px;border-radius:12px;background:#f1efe9;padding:3px}.status-actions button{display:grid;width:32px;height:32px;place-items:center;border-radius:9px;background:transparent;color:#94978f}.status-actions button:hover{background:#fff;color:var(--ink)}.status-actions button.active.frozen{background:#e2effc;color:#286a9d}.status-actions button.active.open{background:#ffedd0;color:#8a5200}.status-actions button.active.low,.status-actions button.active.expiring{background:#ffe6df;color:#a33d27}.stock-name h3{margin:18px 0 2px;font-size:1.04rem;letter-spacing:-.02em}.stock-name p{margin:0;color:#888b82;font-size:.78rem;font-weight:700}.micro-signals{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}.micro-signals span{display:inline-flex;align-items:center;gap:4px;border-radius:99px;background:#f2f0ea;padding:4px 7px;color:#676b62;font-size:.68rem;font-weight:800}.micro-signals svg{width:12px;height:12px}.stock-card-bottom{display:flex;align-items:center;gap:7px;margin-top:auto;padding-top:16px}.stock-card-bottom>small{max-width:42px;overflow:hidden;color:var(--muted);font-size:.7rem;text-overflow:ellipsis}.stepper{display:grid;grid-template-columns:32px minmax(36px,auto) 32px;align-items:center;overflow:hidden;border:1px solid var(--line);border-radius:12px}.stepper button{display:grid;height:34px;place-items:center;background:#f5f3ee;color:var(--ink)}.stepper button:hover{background:var(--lime)}.stepper svg{width:14px}.stepper strong{text-align:center;font-size:.85rem}.card-actions{display:flex;gap:4px;margin-left:auto}.card-actions button{display:grid;width:35px;height:35px;place-items:center;border-radius:11px;background:#f0eee8;color:#71756c}.card-actions button:first-child{background:var(--ink);color:#fff}.card-actions button:hover{background:var(--paprika);color:#fff}
 .panel-page{min-height:74vh;border-radius:32px;background:#fff;padding:clamp(22px,4vw,52px)}.page-title{margin-bottom:22px}.page-title h1{font-size:clamp(3rem,7vw,6.5rem);line-height:.9}.page-title p{margin:10px 0 0;color:var(--muted)}.import-panel{display:grid;grid-template-columns:minmax(180px,.6fr) minmax(250px,1.4fr) auto;align-items:end;gap:12px;margin-bottom:16px;border-radius:22px;background:#eeece6;padding:16px}.import-panel p{margin:4px 0 0;color:var(--muted);font-size:.8rem}.import-panel textarea{min-height:105px;resize:vertical;border:1px solid var(--line);border-radius:14px;background:#fff;padding:12px}.quick-add{display:grid;grid-template-columns:1fr 48px;gap:8px;max-width:720px}.quick-add input{height:50px;border:1px solid var(--line);border-radius:15px;padding:0 14px;font-size:1rem}.quick-add button{display:grid;place-items:center;border-radius:15px;background:var(--paprika);color:#fff}.recent-strip{display:flex;align-items:center;gap:7px;margin:16px 0;overflow:auto;scrollbar-width:none}.recent-strip>span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;color:var(--muted);font-size:.72rem;font-weight:900;text-transform:uppercase}.recent-strip button{display:flex;align-items:center;gap:8px;white-space:nowrap;border:1px solid var(--line);border-radius:99px;background:#fff;padding:7px 10px;font-size:.78rem;font-weight:800}.recent-strip small{color:var(--muted);font-weight:600}.shopping-layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.7fr);gap:18px}.shopping-list{display:grid;align-content:start;gap:8px}.shopping-row{display:grid;grid-template-columns:36px minmax(120px,1fr) auto auto 42px;align-items:center;gap:10px;border:1px solid var(--line);border-radius:17px;background:#faf9f5;padding:10px}.shopping-row.checked .shopping-name b{text-decoration:line-through;color:#8b8e87}.check-button{display:grid;width:32px;height:32px;place-items:center;border:2px solid #b5b9af;border-radius:10px;background:transparent}.shopping-row.checked .check-button{border-color:#78a649;background:var(--lime)}.shopping-name{display:grid}.shopping-name small{margin-top:2px;color:var(--muted);font-size:.7rem;text-transform:capitalize}.stock-button{display:inline-flex;align-items:center;gap:6px;height:38px;border-radius:12px;background:var(--ink);padding:0 12px;color:#fff;font-size:.78rem;font-weight:850}.stock-button:hover{background:#343830}.shopping-row .delete{width:38px;height:38px;background:transparent}.smart-panel{align-self:start;border-radius:24px;background:var(--ink);padding:22px;color:#fff}.smart-panel .eyebrow{color:var(--lime)}.smart-panel h2{margin:0;font-family:"Arial Black",Impact,sans-serif;font-size:2rem;letter-spacing:-.04em}.smart-panel>p{margin:7px 0 16px;color:#b9bdb3;font-size:.8rem;line-height:1.5}.smart-panel>div{display:grid;gap:5px}.smart-panel>div>button{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:9px;border-radius:14px;background:#30342d;padding:10px;color:#fff;text-align:left}.smart-panel>div>button:hover{background:#3a3f36}.smart-panel .rank{color:var(--lime);font-family:ui-monospace,monospace;font-size:.75rem}.smart-panel button span:nth-child(2){display:grid}.smart-panel button small{margin-top:2px;color:#9fa49a;font-size:.68rem}.smart-panel button>svg{color:var(--lime)}
 .recipes-page{display:grid;grid-template-columns:minmax(300px,.72fr) minmax(0,1.28fr);gap:14px;min-height:74vh}.recipe-import{display:flex;min-height:72vh;flex-direction:column;align-items:flex-start;border-radius:32px;background:var(--ink);padding:clamp(25px,4vw,52px);color:#fff}.recipe-import h1,.cook-intro h1{font-size:clamp(3.2rem,7vw,6rem);line-height:.9}.recipe-import>p,.cook-intro>p{max-width:470px;margin:20px 0;color:#c1c5bb;line-height:1.6}.recipe-import textarea{width:100%;min-height:280px;flex:1;resize:vertical;border:0;border-radius:18px;background:#30342d;padding:16px;color:#fff;line-height:1.5}.recipe-import textarea::placeholder{color:#8f958a}.recipe-import>button{margin-top:12px;background:var(--paprika)}.recipe-list{display:grid;align-content:start;gap:12px;border-radius:32px;background:var(--soft);padding:14px}.recipe-card{border:1px solid var(--line);border-radius:22px;background:#fff;padding:18px}.recipe-card-top{display:flex;align-items:start;justify-content:space-between;gap:12px}.recipe-card h2{margin:8px 0 0;font-size:1.35rem;letter-spacing:-.03em}.availability{display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:5px 8px;font-size:.7rem;font-weight:900;letter-spacing:.04em;text-transform:uppercase}.availability svg{width:13px}.availability.ready{background:#e5f4da;color:#3f702c}.availability.missing{background:#ffe8df;color:#9d3e27}.availability.unknown{background:#ecebe7;color:#666b62}.coverage{height:7px;margin:16px 0 12px;overflow:hidden;border-radius:99px;background:#eceae4}.coverage span{display:block;height:100%;border-radius:inherit;background:#81b64d}.ingredient-match{display:flex;flex-wrap:wrap;gap:6px}.ingredient-match span,.ingredient-match button{display:inline-flex;align-items:center;gap:4px;border-radius:99px;padding:6px 8px;font-size:.72rem;font-weight:800}.ingredient-match span{background:#eef6e8;color:#47742e}.ingredient-match button{background:#fff0e9;color:#9d3e27}.ingredient-match svg{width:12px}.ingredient-match small{opacity:.7}.recipe-card details{margin-top:14px;border-top:1px solid #e2ded4;padding-top:12px}.recipe-card summary{cursor:pointer;font-size:.8rem;font-weight:850}.recipe-card pre{max-height:340px;overflow:auto;white-space:pre-wrap;font-family:inherit;color:#555950;font-size:.78rem;line-height:1.6}.missing-all{margin-top:12px}.empty{display:grid;min-height:240px;place-items:center;align-content:center;gap:5px;border:1px dashed #c7c4ba;border-radius:22px;background:#f8f6f1;color:var(--muted);text-align:center}.empty>svg{width:28px;height:28px;margin-bottom:6px}.empty h3,.empty p{margin:0}.empty h3{color:var(--ink)}.empty p{max-width:350px;font-size:.83rem}
 .cook-page{display:grid;grid-template-columns:minmax(300px,.74fr) minmax(0,1.26fr);min-height:75vh;overflow:hidden;border-radius:32px;background:var(--ink);color:#fff}.cook-intro{display:flex;flex-direction:column;align-items:flex-start;padding:clamp(28px,4vw,58px)}.tone-switch{display:grid;width:100%;grid-template-columns:repeat(3,1fr);gap:6px;border-radius:18px;background:#30342d;padding:6px}.tone-switch button{display:flex;min-width:0;flex-direction:column;align-items:center;gap:4px;border-radius:13px;background:transparent;padding:10px 4px;color:#9da298;font-size:.7rem;font-weight:850;text-transform:capitalize}.tone-switch button.active{background:var(--lime);color:var(--ink)}.prompt-signals{display:flex;flex-wrap:wrap;gap:6px;margin:16px 0}.prompt-signals span{display:inline-flex;align-items:center;gap:5px;border-radius:99px;background:#30342d;padding:6px 9px;color:#bbc0b6;font-size:.68rem;font-weight:800}.prompt-signals svg{width:12px}.copy-prompt{margin-top:auto;background:var(--paprika)}.prompt-paper{margin:14px;overflow:hidden;border-radius:23px;background:#f8f6f0;color:var(--ink);box-shadow:inset 0 0 0 1px #dedad0}.prompt-paper header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dedad0;padding:15px 18px}.prompt-paper header span{display:flex;align-items:center;gap:7px;font-weight:850}.prompt-paper header small{color:var(--muted)}.prompt-paper pre{height:calc(75vh - 76px);margin:0;overflow:auto;padding:20px;white-space:pre-wrap;font-family:inherit;font-size:.8rem;line-height:1.65}
@@ -571,4 +571,279 @@ button svg.lucide{pointer-events:none}
     row-gap:10px;
     padding-top:16px;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Phone density + icon reliability pass
+   -------------------------------------------------------------------------- */
+
+/* Lucide strokes can extend fractionally beyond their nominal viewBox.
+   The wrapper owns layout sizing, but should never crop the drawing. */
+.ui-icon,
+.ui-icon > svg,
+.ui-icon > svg.lucide{
+  overflow:visible;
+}
+.ui-icon{
+  align-items:center;
+  justify-items:center;
+  vertical-align:middle;
+}
+.ui-icon > svg.lucide{
+  width:100%;
+  height:100%;
+  stroke:currentColor;
+}
+
+@media(max-width:620px){
+  /* Make the top of Stock useful sooner on a phone. */
+  .app-shell{
+    padding:12px 10px calc(92px + env(safe-area-inset-bottom,0px));
+  }
+  .signal-card{
+    gap:15px;
+    padding:18px;
+    border-radius:24px;
+  }
+  .signal-copy h1{
+    font-size:clamp(2.25rem,11vw,2.9rem);
+    line-height:.93;
+  }
+  .signal-copy p{
+    margin-top:11px;
+    font-size:.86rem;
+  }
+  .cook-now{
+    grid-template-columns:42px minmax(0,1fr) 17px;
+    gap:9px;
+    padding:7px 11px 7px 7px;
+    border-radius:18px;
+  }
+  .cook-now>span{
+    width:42px;
+    height:42px;
+    border-radius:13px;
+  }
+  .cook-now .ui-icon{--icon-size:20px}
+
+  /* Three glanceable signals in one row instead of three tall cards. */
+  .insight-grid{
+    grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:8px;
+    margin:10px 0 24px;
+  }
+  .insight-card{
+    display:grid;
+    grid-template-columns:30px minmax(0,1fr);
+    align-items:start;
+    gap:7px;
+    min-height:72px;
+    padding:9px;
+    border-radius:16px;
+  }
+  .insight-card>span{
+    width:30px;
+    height:30px;
+    border-radius:10px;
+  }
+  .insight-card>span .ui-icon{--icon-size:15px}
+  .insight-card small{
+    font-size:.54rem;
+    line-height:1.15;
+    letter-spacing:.055em;
+  }
+  .insight-card b{
+    margin-top:3px;
+    font-size:.76rem;
+    line-height:1.12;
+  }
+  .insight-card p{display:none}
+
+  .section-head{gap:14px}
+  .section-head h2{font-size:1.9rem}
+
+  /* Search gets a full row; the four state filters become proper icon buttons.
+     Previous CSS hid all spans here, including the .ui-icon wrapper. */
+  .toolbar{
+    display:grid;
+    width:100%;
+    grid-template-columns:repeat(4,40px);
+    justify-content:start;
+    gap:7px;
+  }
+  .search{
+    grid-column:1/-1;
+    width:100%;
+    height:40px;
+  }
+  .filter-button{
+    width:40px;
+    height:40px;
+    min-width:40px;
+    padding:0;
+    border-radius:13px;
+  }
+  .filter-button>.ui-icon{
+    display:inline-grid !important;
+    --icon-size:17px;
+  }
+  .filter-button>span:not(.ui-icon){display:none}
+
+  /* Category chips keep their Lucide glyphs and scroll horizontally. */
+  .category-row{
+    gap:7px;
+    margin:13px -10px 15px;
+    padding:0 10px 2px;
+  }
+  .category-row button{
+    height:39px;
+    gap:7px;
+    padding:0 10px 0 7px;
+    font-size:.72rem;
+  }
+  .category-glyph{
+    width:24px;
+    height:24px;
+    min-width:24px;
+    border-radius:8px;
+  }
+  .category-glyph .ui-icon{--icon-size:14px}
+  .manage-categories>.ui-icon{--icon-size:16px}
+
+  /* Phone stock is intentionally a dense two-column catalogue. */
+  .stock-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:10px;
+  }
+  .stock-card{
+    min-height:202px;
+    padding:11px;
+    border-top-width:3px;
+    border-radius:18px;
+  }
+  .stock-card:hover{
+    transform:none;
+    box-shadow:0 3px 0 rgb(31 33 29/3%);
+  }
+  .stock-card-top{
+    min-height:32px;
+    gap:6px;
+  }
+  .category-mark{
+    width:32px;
+    height:32px;
+    min-width:32px;
+    border-radius:10px;
+  }
+  .category-mark>.category-glyph{
+    width:24px;
+    height:24px;
+    min-width:24px;
+  }
+  .category-mark>.category-glyph .ui-icon,
+  .category-mark>.ui-icon{--icon-size:15px}
+  .status-actions{
+    gap:2px;
+    padding:2px;
+    border-radius:10px;
+  }
+  .status-actions button{
+    width:24px;
+    height:28px;
+    border-radius:8px;
+  }
+  .status-actions .ui-icon{--icon-size:13px}
+
+  .stock-name h3{
+    display:-webkit-box;
+    min-height:2.2em;
+    margin:11px 0 2px;
+    overflow:hidden;
+    -webkit-box-orient:vertical;
+    -webkit-line-clamp:2;
+    font-size:.9rem;
+    line-height:1.1;
+  }
+  .stock-name p{
+    overflow:hidden;
+    font-size:.66rem;
+    line-height:1.2;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  /* Analytics are useful on desktop but take disproportionate room here. */
+  .stock-card .micro-signals{display:none}
+
+  .stock-card-bottom{
+    column-gap:5px;
+    row-gap:8px;
+    padding-top:11px;
+  }
+  .stepper{
+    grid-template-columns:26px minmax(27px,auto) 26px;
+    border-radius:10px;
+  }
+  .stepper button{
+    width:26px;
+    height:30px;
+  }
+  .stepper .ui-icon{--icon-size:12px}
+  .stepper strong{
+    min-width:27px;
+    padding:0 2px;
+    font-size:.73rem;
+  }
+  .stock-card-bottom>small{
+    max-width:50px;
+    overflow:hidden;
+    font-size:.64rem;
+    line-height:1.1;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .stock-card-bottom>.card-actions{
+    gap:5px;
+  }
+  .card-actions button{
+    width:30px;
+    height:30px;
+    border-radius:9px;
+  }
+  .card-actions .ui-icon{--icon-size:15px}
+
+  /* Keep the bottom navigation icons optically centred and uncropped. */
+  .mobile-nav{
+    right:8px;
+    bottom:max(8px,env(safe-area-inset-bottom,0px));
+    left:8px;
+  }
+  .mobile-nav button{height:56px}
+  .mobile-nav .ui-icon{--icon-size:19px}
+}
+
+/* The 2-up catalogue remains usable even on very narrow phones. */
+@media(max-width:350px){
+  .stock-grid{gap:8px}
+  .stock-card{padding:10px}
+  .status-actions button{width:23px}
+  .stock-card-bottom>small{max-width:42px}
+  .card-actions button{width:29px;height:29px}
+}
+
+
+/* Near-expiry state replaces the old quantity-based low flag. */
+.status-actions button.active.expiring{background:#ffe6df;color:#a33d27}
+
+@media(max-width:620px){
+  /* Never let a card's top controls force the two-column catalogue wider. */
+  .stock-card-top{min-width:0}
+  .status-actions{min-width:0;flex:0 1 auto}
+  .status-actions button{flex:0 0 auto}
+  .stock-card-bottom{min-width:0}
+  .stock-card-bottom>.stepper{max-width:100%}
+  .stock-card-bottom>.card-actions{min-width:0}
+  .card-actions button{flex:0 0 auto}
+
+  /* On phones labels would crowd four compact state buttons; icons carry the state. */
+  .filter-button>span:not(.ui-icon){display:none!important}
 }
