@@ -1281,3 +1281,43 @@ button svg.lucide{pointer-events:none}
   .recent-strip>span{flex:0 0 auto}
   .template-editor textarea{min-height:360px}
 }
+
+/* v19 phone header + stock-page vertical rhythm */
+@media(max-width:620px){
+  /* The Add stock label is already hidden by font-size:0. Do not hide its
+     only element child — that child is the Lucide + icon wrapper. */
+  .top-actions .primary-button > span.ui-icon:last-child{
+    display:inline-grid !important;
+    color:#fff;
+    --icon-size:20px;
+  }
+
+  /* The older <=900px rule hides all soft buttons. Bring the dedicated help
+     action back as an icon-only phone control. */
+  .top-actions .help-button{
+    display:inline-flex !important;
+  }
+
+  /* Keep all three phone header controls on the same optical grid. */
+  .top-actions .help-button,
+  .top-actions .icon-button,
+  .top-actions .primary-button{
+    align-items:center;
+    justify-content:center;
+  }
+  .top-actions .icon-button > .ui-icon,
+  .top-actions .help-button > .ui-icon,
+  .top-actions .primary-button > .ui-icon{
+    margin:0;
+    vertical-align:0;
+  }
+
+  /* The three glance cards already create their own visual separation. The
+     previous 24px bottom margin made the Pantry section feel disconnected. */
+  .stock-page .insight-grid{
+    margin:10px 0 12px;
+  }
+  .stock-page .section-head{
+    margin-top:0;
+  }
+}
