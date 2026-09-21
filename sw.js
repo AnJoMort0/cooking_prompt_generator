@@ -1,7 +1,8 @@
-const VERSION = "mise-pwa-v11";
+const VERSION = "mise-pwa-v12";
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 const LUCIDE_URL = "https://unpkg.com/lucide@1.47.0";
+const QRCODE_URL = "https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js";
 
 const APP_SHELL = [
     "./",
@@ -29,11 +30,13 @@ self.addEventListener("install", event => {
 
         /* Warm Lucide when possible, but do not fail installation if the CDN
            is temporarily unavailable. */
-        try {
-            const response = await fetch(LUCIDE_URL, { mode: "cors" });
-            if (response.ok) await cache.put(LUCIDE_URL, response.clone());
+        for (const url of [LUCIDE_URL, QRCODE_URL]) {
+            try {
+                const response = await fetch(url, { mode: "cors" });
+                if (response.ok) await cache.put(url, response.clone());
+            }
+            catch { }
         }
-        catch { }
 
         await self.skipWaiting();
     })());
@@ -54,8 +57,8 @@ self.addEventListener("fetch", event => {
 
     const url = new URL(request.url);
 
-    /* Lucide: cache-first after the first successful network request. */
-    if (request.url === LUCIDE_URL || (url.origin === "https://unpkg.com" && url.pathname.startsWith("/lucide@1.47.0"))) {
+    /* Pinned UI libraries: cache-first after the first successful request. */
+    if (request.url === LUCIDE_URL || request.url === QRCODE_URL || (url.origin === "https://unpkg.com" && url.pathname.startsWith("/lucide@1.47.0")) || (url.origin === "https://cdnjs.cloudflare.com" && url.pathname.endsWith("/qrcodejs/1.0.0/qrcode.min.js"))) {
         event.respondWith((async () => {
             const cached = await caches.match(request) || await caches.match(LUCIDE_URL);
             if (cached) return cached;

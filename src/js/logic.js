@@ -407,6 +407,160 @@ function migrateLegacyStatuses(state) {
     };
 }
 
+
+/* Device-to-device transfer. The payload is kept in the URL fragment, so it is
+   never sent to GitHub Pages. Incoming data is merged by human-facing names:
+   matching records update, new records are added, and receiver-only records stay. */
+const TRANSFER_PARAM = "mise-transfer";
+const TRANSFER_FALLBACK_URL = "https://anjomort0.github.io/cooking_prompt_generator/";
+
+function bytesToBase64Url(bytes) {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+function base64UrlToBytes(value) {
+    let base64 = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (base64.length % 4) base64 += "=";
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+async function compressTransferText(text) {
+    const source = new TextEncoder().encode(text);
+    if (typeof CompressionStream !== "function") return `r.${bytesToBase64Url(source)}`;
+    try {
+        const stream = new Blob([source]).stream().pipeThrough(new CompressionStream("gzip"));
+        const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
+        return `g.${bytesToBase64Url(compressed)}`;
+    }
+    catch { return `r.${bytesToBase64Url(source)}`; }
+}
+async function decompressTransferText(token) {
+    const [mode, encoded] = String(token || "").split(".", 2);
+    if (!encoded || !["g", "r"].includes(mode)) throw new Error("Invalid Mise transfer link");
+    const bytes = base64UrlToBytes(encoded);
+    if (mode === "r") return new TextDecoder().decode(bytes);
+    if (typeof DecompressionStream !== "function") throw new Error("This browser cannot unpack the transfer link");
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+    return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+}
+function transferBaseUrl() {
+    try {
+        const current = new URL(location.href);
+        if (current.protocol === "http:" || current.protocol === "https:") {
+            if (!["localhost", "127.0.0.1"].includes(current.hostname)) { current.hash = ""; current.search = ""; return current.href; }
+        }
+    }
+    catch { }
+    return TRANSFER_FALLBACK_URL;
+}
+async function makeTransferLink(state) {
+    const payload = { kind: "mise-transfer", version: 1, createdAt: Date.now(), state: migrateLegacyStatuses(state) };
+    const encoded = await compressTransferText(JSON.stringify(payload));
+    return `${transferBaseUrl()}#${TRANSFER_PARAM}=${encoded}`;
+}
+function transferTokenFromLocation() {
+    try { return new URLSearchParams(String(location.hash || "").replace(/^#/, "")).get(TRANSFER_PARAM) || ""; }
+    catch { return ""; }
+}
+function clearTransferHash() {
+    try { const url = new URL(location.href); url.hash = ""; history.replaceState(null, "", url.href); } catch { }
+}
+async function decodeTransferLinkToken(token) {
+    const payload = JSON.parse(await decompressTransferText(token));
+    if (payload?.kind !== "mise-transfer" || payload.version !== 1 || !payload.state || !Array.isArray(payload.state.stock) || !Array.isArray(payload.state.categories)) throw new Error("Invalid Mise transfer data");
+    return { ...payload, state: migrateLegacyStatuses(payload.state) };
+}
+function mergeAnalytics(current = {}, incoming = {}) {
+    const result = { ...current };
+    for (const [key, value] of Object.entries(incoming || {})) {
+        const existing = result[key] || {};
+        const times = Array.from(new Set([...(existing.stockedAt || []), ...(value?.stockedAt || [])].map(Number).filter(Number.isFinite))).sort((a, b) => a - b).slice(-20);
+        result[key] = {
+            ...existing, ...value,
+            shoppingAdds: Math.max(Number(existing.shoppingAdds || 0), Number(value?.shoppingAdds || 0)),
+            stockAdds: Math.max(Number(existing.stockAdds || 0), Number(value?.stockAdds || 0)),
+            lastShoppingAt: Math.max(Number(existing.lastShoppingAt || 0), Number(value?.lastShoppingAt || 0)) || undefined,
+            lastStockedAt: Math.max(Number(existing.lastStockedAt || 0), Number(value?.lastStockedAt || 0)) || undefined,
+            stockedAt: times
+        };
+    }
+    return result;
+}
+function mergeNamedRecords(current, incoming, nameOf, prepareIncoming = value => value) {
+    const records = [...(current || [])];
+    let added = 0, updated = 0;
+    for (const raw of incoming || []) {
+        const value = prepareIncoming(raw);
+        const key = normalise(nameOf(value));
+        if (!key) continue;
+        const index = records.findIndex(existing => normalise(nameOf(existing)) === key);
+        if (index >= 0) { records[index] = { ...records[index], ...value, id: records[index].id || value.id || uuid() }; updated++; }
+        else { records.push({ ...value, id: value.id || uuid() }); added++; }
+    }
+    return { records, added, updated };
+}
+function mergeTransferredState(currentState, incomingState) {
+    const current = migrateLegacyStatuses(currentState);
+    const incoming = migrateLegacyStatuses(incomingState);
+
+    const categories = [...(current.categories || [])];
+    const categoryMap = new Map();
+    let categoriesAdded = 0, categoriesUpdated = 0;
+    for (const category of incoming.categories || []) {
+        const key = normalise(category.name);
+        if (!key) continue;
+        const index = categories.findIndex(existing => normalise(existing.name) === key);
+        if (index >= 0) {
+            const targetId = categories[index].id;
+            categories[index] = { ...categories[index], ...category, id: targetId };
+            categoryMap.set(category.id, targetId); categoriesUpdated++;
+        } else {
+            let id = category.id || uuid();
+            if (categories.some(existing => existing.id === id)) id = uuid();
+            categories.push({ ...category, id });
+            categoryMap.set(category.id, id); categoriesAdded++;
+        }
+    }
+
+    const stockMerge = mergeNamedRecords(current.stock, incoming.stock, item => item.name, item => ({
+        ...item,
+        categoryId: item.categoryId ? (categoryMap.get(item.categoryId) || (categories.some(category => category.id === item.categoryId) ? item.categoryId : null)) : null,
+        statuses: itemStatuses(item),
+        increment: itemIncrement(item)
+    }));
+    const recipeMerge = mergeNamedRecords(current.recipes, incoming.recipes, recipe => recipe.title, recipe => ({
+        ...recipe, ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : []
+    }));
+    const shoppingMerge = mergeNamedRecords(current.shopping, incoming.shopping, item => item.name, item => ({ ...item, quantity: Number(item.quantity || 1), checked: Boolean(item.checked) }));
+
+    const activityKey = entry => `${entry?.type || ""}|${entry?.label || ""}|${Number(entry?.at || 0)}`;
+    const seenActivity = new Set();
+    const activity = [...(incoming.activity || []), ...(current.activity || [])].filter(entry => { const key = activityKey(entry); if (seenActivity.has(key)) return false; seenActivity.add(key); return true; }).sort((a, b) => Number(b.at || 0) - Number(a.at || 0)).slice(0, 100);
+
+    return {
+        state: {
+            ...current,
+            version: 1,
+            categories,
+            stock: stockMerge.records,
+            recipes: recipeMerge.records,
+            shopping: shoppingMerge.records,
+            analytics: mergeAnalytics(current.analytics, incoming.analytics),
+            activity
+        },
+        summary: {
+            categoriesAdded, categoriesUpdated,
+            stockAdded: stockMerge.added, stockUpdated: stockMerge.updated,
+            recipesAdded: recipeMerge.added, recipesUpdated: recipeMerge.updated,
+            shoppingAdded: shoppingMerge.added, shoppingUpdated: shoppingMerge.updated
+        }
+    };
+}
+
 function loadState() {
     try {
         const saved = localStorage.getItem(STORAGE_KEY);

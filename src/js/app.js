@@ -61,6 +61,8 @@ function App() {
     const [showAdd, setShowAdd] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
+    const [showTransfer, setShowTransfer] = useState(false);
+    const [incomingTransfer, setIncomingTransfer] = useState(null);
     const [showImport, setShowImport] = useState(false);
     const [shoppingText, setShoppingText] = useState("");
     const [shoppingImport, setShoppingImport] = useState("");
@@ -79,6 +81,13 @@ function App() {
     useEffect(() => saveState(state), [state]);
     useEffect(() => { const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener("online", on); window.addEventListener("offline", off); return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); }; }, []);
     const notify = (message) => { setToast(message); window.setTimeout(() => setToast(""), 1800); };
+    useEffect(() => {
+        const token = transferTokenFromLocation();
+        if (!token) return;
+        let cancelled = false;
+        decodeTransferLinkToken(token).then(payload => { if (!cancelled) setIncomingTransfer(payload); }).catch(() => { if (!cancelled) { clearTransferHash(); notify("That Mise transfer link is not valid"); } });
+        return () => { cancelled = true; };
+    }, []);
     const activity = (type, label) => ({ id: uuid(), type, label, at: Date.now() });
     const addToShopping = (name, source = "manual") => setState(current => { const existing = current.shopping.find(item => matchesName(item.name, name)); const shopping = existing ? current.shopping.map(item => item.id === existing.id ? { ...item, quantity: item.quantity + 1, addedAt: Date.now(), checked: false } : item) : [newShoppingItem(name, source), ...current.shopping]; return { ...current, shopping, analytics: bumpAnalytics(current, name, "shop"), activity: [activity("shop", `${name} added to shopping`), ...current.activity].slice(0, 100) }; });
     const adjustStock = (id, direction) => setState(current => ({ ...current, stock: current.stock.map(item => { if (item.id !== id)
@@ -247,6 +256,16 @@ function App() {
     catch {
         notify("That backup is not valid");
     } };
+    const mergeIncomingTransfer = (payload) => {
+        const merged = mergeTransferredState(state, payload.state);
+        setState(merged.state);
+        setIncomingTransfer(null);
+        clearTransferHash();
+        const added = merged.summary.stockAdded + merged.summary.recipesAdded + merged.summary.categoriesAdded + merged.summary.shoppingAdded;
+        const updated = merged.summary.stockUpdated + merged.summary.recipesUpdated + merged.summary.categoriesUpdated + merged.summary.shoppingUpdated;
+        notify(`Data merged · ${added} new · ${updated} matched`);
+    };
+    const dismissIncomingTransfer = () => { setIncomingTransfer(null); clearTransferHash(); };
     return h("main", null,
         h("div", { className: "app-shell" },
             h("header", { className: "topbar" },
@@ -510,7 +529,9 @@ function App() {
                     h("button", { className: "soft-button", onClick: () => setShowRecipeImport(false) }, "Cancel"),
                     h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
         selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
-        showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify }),
+        showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); } }),
+        showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify }),
+        incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onMerge: () => mergeIncomingTransfer(incomingTransfer), onClose: dismissIncomingTransfer }),
         toast && h("div", { className: "toast", role: "status", "aria-live": "polite" },
             h(Check, null),
             toast));
@@ -625,7 +646,79 @@ function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
             h("div", { className: "recipe-history" }, recipe.lastCookedAt ? `Cooked ${recipe.timesCooked || 1}× · last ${timeLabel(recipe.lastCookedAt)}` : "Not cooked yet in Mise"),
             h("div", { className: "recipe-danger" }, h("button", { className: "danger-link", onClick: onDelete }, h(Trash2, null), "Delete recipe"))));
 }
-function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify }) {
+function TransferModal({ state, onClose, notify }) {
+    const [link, setLink] = useState("");
+    const [error, setError] = useState("");
+    const [qrError, setQrError] = useState("");
+    const qrRef = useRef(null);
+    useEffect(() => {
+        let cancelled = false;
+        makeTransferLink(state).then(value => { if (!cancelled) setLink(value); }).catch(() => { if (!cancelled) setError("Could not create a transfer link on this browser."); });
+        return () => { cancelled = true; };
+    }, [state]);
+    useEffect(() => {
+        if (!link || !qrRef.current) return;
+        qrRef.current.replaceChildren();
+        setQrError("");
+        try {
+            if (typeof QRCode !== "function") throw new Error("QR library unavailable");
+            new QRCode(qrRef.current, { text: link, width: 232, height: 232, colorDark: "#1d211c", colorLight: "#ffffff", correctLevel: QRCode.CorrectLevel.L });
+        }
+        catch { setQrError("This transfer is too large for one QR code. Copy or share the link instead."); }
+    }, [link]);
+    const copyLink = async () => {
+        if (!link) return;
+        try { await navigator.clipboard.writeText(link); notify("Transfer link copied"); }
+        catch { window.prompt("Copy this transfer link:", link); }
+    };
+    const shareLink = async () => {
+        if (!link) return;
+        if (navigator.share) { try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this Mise kitchen data into another device.", url: link }); return; } catch { } }
+        copyLink();
+    };
+    return h(Modal, { title: "Transfer your Mise data", onClose, wide: true },
+        h("div", { className: "transfer-layout" },
+            h("section", { className: "transfer-explainer" },
+                h("span", { className: "eyebrow" }, h(Smartphone, null), " DEVICE TO DEVICE"),
+                h("h3", null, "Scan on the other device"),
+                h("p", null, "The receiving device merges this snapshot into what it already has. Same ingredient, recipe, shopping item or category names are updated; new ones are added; receiver-only data is never deleted."),
+                h("div", { className: "transfer-counts" },
+                    h("span", null, h(Box, null), h("b", null, state.stock.length), " ingredients"),
+                    h("span", null, h(BookOpen, null), h("b", null, state.recipes.length), " recipes"),
+                    h("span", null, h(Tags, null), h("b", null, state.categories.length), " categories"),
+                    h("span", null, h(ShoppingBasket, null), h("b", null, state.shopping.length), " shopping")),
+                h("div", { className: "transfer-privacy" }, h(ShieldCheck, null), h("p", null, "The data is encoded after the # in the link, so it is not sent to GitHub Pages. Anyone you give the link to can read the snapshot, so share it only with devices you trust."))),
+            h("section", { className: "transfer-code-panel" },
+                !link && !error ? h("div", { className: "transfer-loading" }, h(QrCode, null), "Building transfer…") : null,
+                error ? h("div", { className: "transfer-error" }, h(TriangleAlert, null), error) : null,
+                link ? h(Fragment, null,
+                    h("div", { className: `qr-shell ${qrError ? "qr-unavailable" : ""}` }, h("div", { ref: qrRef, className: "qr-code", "aria-label": "Mise transfer QR code" }), qrError ? h("p", null, qrError) : null),
+                    h("label", { className: "transfer-link-field" }, h("span", null, "Transfer link"), h("textarea", { value: link, readOnly: true, rows: 3, onFocus: event => event.target.select() })),
+                    h("div", { className: "transfer-actions" },
+                        h("button", { className: "primary-button", onClick: copyLink }, h(Copy, null), "Copy link"),
+                        h("button", { className: "soft-button", onClick: shareLink }, h(Share2, null), "Share"))) : null)));
+}
+function TransferImportModal({ payload, onMerge, onClose }) {
+    const incoming = payload.state;
+    const created = payload.createdAt ? new Date(payload.createdAt).toLocaleString() : "another device";
+    return h(Modal, { title: "Merge Mise data?", onClose, wide: true },
+        h("div", { className: "transfer-import" },
+            h("div", { className: "transfer-import-icon" }, h(GitMerge, null)),
+            h("div", null,
+                h("span", { className: "eyebrow" }, "INCOMING SNAPSHOT"),
+                h("h3", null, "Add and update — never delete"),
+                h("p", null, `Created ${created}. Matching names from this transfer will update the copy on this device. Anything that exists only on this device stays exactly where it is.`)),
+            h("div", { className: "transfer-counts incoming" },
+                h("span", null, h(Box, null), h("b", null, incoming.stock?.length || 0), " ingredients"),
+                h("span", null, h(BookOpen, null), h("b", null, incoming.recipes?.length || 0), " recipes"),
+                h("span", null, h(Tags, null), h("b", null, incoming.categories?.length || 0), " categories"),
+                h("span", null, h(ShoppingBasket, null), h("b", null, incoming.shopping?.length || 0), " shopping")),
+            h("div", { className: "transfer-merge-note" }, h(ShieldCheck, null), h("p", null, "Stock quantities, units, statuses, increments, recipe details and matching category settings from the sending device take precedence for matching names.")),
+            h("div", { className: "modal-actions" },
+                h("button", { className: "soft-button", onClick: onClose }, "Cancel"),
+                h("button", { className: "primary-button", onClick: onMerge }, h(GitMerge, null), "Merge into this device"))));
+}
+function SettingsModal({ state, setState, onClose, exportData, importRef, restoreData, notify, onTransfer }) {
     const [name, setName] = useState("");
     const [color, setColor] = useState(palette[0]);
     const [icon, setIcon] = useState("");
@@ -666,6 +759,9 @@ function SettingsModal({ state, setState, onClose, exportData, importRef, restor
                 h("h3", null, "Private by design"),
                 h("p", null, "Everything lives in this browser. Export a backup before clearing browser data or changing devices."),
                 h("div", { className: "data-actions" },
+                    h("button", { className: "soft-button transfer-button", onClick: onTransfer },
+                        h(QrCode, null),
+                        "Generate QR / transfer link"),
                     h("button", { className: "soft-button", onClick: exportData },
                         h(HardDriveDownload, null),
                         "Download backup"),
