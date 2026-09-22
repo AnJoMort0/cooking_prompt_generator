@@ -1089,7 +1089,7 @@ function PromptDefaultsModal({ value, onClose, onSave }) {
     };
     return h(Modal, { title: "Default cooking prompt", onClose, wide: true },
         h("div", { className: "template-editor" },
-            h("p", null, "This is the reusable default behind the Cook page. Edit it once and Mise will use it for future prompt copies. You can rewrite the cuisine guidance, tone or output instructions, but keep the placeholders below so live data can still be inserted."),
+            h("p", null, "This is the reusable default behind the Cook page. Edit it once and Mise will use it for future prompt copies. You can rewrite the cuisine guidance, tone or output instructions, but keep the placeholders below so live data can still be inserted. Mise automatically appends your saved recipe library and the last three meals you marked ‘I did this’, so the AI can avoid repetitive meals even if you customise this template."),
             h("div", { className: "template-token-list" }, REQUIRED_PROMPT_TOKENS.map(token => h("code", { key: token }, token))),
             h("textarea", { value: draft, rows: 22, onChange: event => { setDraft(event.target.value); if (error) setError(""); } }),
             error && h("p", { className: "form-error" }, error),

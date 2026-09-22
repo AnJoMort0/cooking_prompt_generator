@@ -621,6 +621,61 @@ function applyPromptTemplate(template, values) {
         .replaceAll("{{TONE_PREFERENCE}}", values.tonePreference);
 }
 
+function uniqueRecipeIngredientNames(recipe) {
+    const seen = new Set();
+    return recipeIngredientObjects(recipe).map(ingredient => String(ingredient?.name || "").trim()).filter(name => {
+        const key = normalise(name);
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+function savedRecipeMemory(state) {
+    const recipes = Array.isArray(state?.recipes) ? state.recipes : [];
+    if (!recipes.length) return "No saved recipes yet.";
+    return recipes.map(recipe => {
+        const ingredients = uniqueRecipeIngredientNames(recipe);
+        const ingredientText = ingredients.length ? ingredients.slice(0, 8).join(", ") + (ingredients.length > 8 ? ", …" : "") : "ingredients not recorded";
+        const descriptors = [recipe.cuisine, recipe.mode, ...(Array.isArray(recipe.tags) ? recipe.tags.slice(0, 3) : [])].map(value => String(value || "").trim()).filter(Boolean);
+        return `- ${recipe.title}${descriptors.length ? ` | ${descriptors.join(" · ")}` : ""} | main ingredients: ${ingredientText}`;
+    }).join("\n");
+}
+function recentCookedMeals(state, limit = 3) {
+    const recipes = Array.isArray(state?.recipes) ? state.recipes : [];
+    const activities = (Array.isArray(state?.activity) ? state.activity : [])
+        .filter(entry => entry?.type === "cook" && Number(entry?.at || 0) > 0)
+        .sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+    const meals = [];
+    for (const entry of activities) {
+        if (meals.length >= limit) break;
+        const title = String(entry.label || "").replace(/\s+cooked\s*$/i, "").trim() || "Cooked meal";
+        const recipe = recipes.find(candidate => normalise(candidate.title) === normalise(title));
+        meals.push({ title, at: Number(entry.at || 0), recipe });
+    }
+    if (meals.length < limit) {
+        const usedEvents = new Set(meals.map(meal => `${normalise(meal.title)}|${meal.at}`));
+        const fallback = recipes.filter(recipe => Number(recipe.lastCookedAt || 0) > 0).sort((a, b) => Number(b.lastCookedAt || 0) - Number(a.lastCookedAt || 0));
+        for (const recipe of fallback) {
+            if (meals.length >= limit) break;
+            const key = `${normalise(recipe.title)}|${Number(recipe.lastCookedAt || 0)}`;
+            if (usedEvents.has(key)) continue;
+            meals.push({ title: recipe.title, at: Number(recipe.lastCookedAt || 0), recipe });
+            usedEvents.add(key);
+        }
+    }
+    return meals;
+}
+function recipeVarietyMemory(state) {
+    const recent = recentCookedMeals(state, 3);
+    const recentText = recent.length ? recent.map((meal, index) => {
+        const ingredients = meal.recipe ? uniqueRecipeIngredientNames(meal.recipe) : [];
+        const ingredientText = ingredients.length ? ingredients.slice(0, 12).join(", ") + (ingredients.length > 12 ? ", …" : "") : "ingredient details unavailable";
+        const date = meal.at ? new Date(meal.at).toISOString().slice(0, 10) : "date unknown";
+        return `${index + 1}. ${meal.title} (${date}) — ${ingredientText}`;
+    }).join("\n") : "No meals have been marked as cooked yet.";
+    return `\n\nRECIPE MEMORY & MEAL ROTATION\nSAVED RECIPE LIBRARY\n${savedRecipeMemory(state)}\n\nLAST 3 COOKED MEALS — newest first\n${recentText}\n\nVARIETY RULES\n- Do not reproduce a saved recipe, rename it, or offer a trivial variation of it. New ideas should be meaningfully different in technique, flavour profile, structure, or ingredient combination.\n- Treat the last three cooked meals as a stronger short-term exclusion zone. Avoid proposing the same dish or a close remix of what was just eaten.\n- Especially avoid repeating essentially the same core combination of protein + starch/base + dominant vegetables/flavour profile as the most recent meal/day before. Rotate the centre of the plate, cooking method and flavour direction where the stock allows it.\n- Ingredient overlap is fine for pantry staples, condiments and items that urgently need using, but do not let that turn into substantially the same meal.\n- If near-expiry stock genuinely makes some repetition sensible, use it in a clearly different dish and technique rather than ignoring the stock or forcing waste.\n- Use this memory for exclusion and variety only; do not output or quote this memory back to me.`;
+}
+
 function makePrompt(state, tone) {
     const categoryById = Object.fromEntries(state.categories.map(category => [category.id, category.name]));
     const available = state.stock.filter(i => i.quantity > 0).map(i => {
@@ -629,11 +684,12 @@ function makePrompt(state, tone) {
         return `${i.name} (${formatQuantity(i.quantity)}${i.unit ? ` ${i.unit}` : ""}${category ? `, ${category}` : ""}${statuses.length ? `, ${statuses.join(", ")}` : ""})`;
     }).join(", ");
     const favourites = topRecipeItems(state).map(x => `${x.item.name} (${x.count} saved recipes)`).join(", ") || "No history yet";
-    return applyPromptTemplate(normalisePromptTemplate(state.promptTemplate), {
+    const basePrompt = applyPromptTemplate(normalisePromptTemplate(state.promptTemplate), {
         currentStock: available,
         localHabits: favourites,
         tonePreference: promptTonePreference(tone)
     });
+    return `${basePrompt}${recipeVarietyMemory(state)}`;
 }
 
 function migrateLegacyStatuses(state) {
