@@ -1321,3 +1321,52 @@ button svg.lucide{pointer-events:none}
     margin-top:0;
   }
 }
+
+
+/* v21 install experience */
+.install-banner{display:grid;grid-template-columns:38px minmax(0,1fr) 18px;align-items:center;gap:10px;width:max-content;max-width:360px;margin:-8px 0 16px auto;border:1px solid var(--line);border-radius:16px;background:#fff;padding:8px 10px;color:var(--ink);text-align:left;box-shadow:0 3px 0 rgb(31 33 29/3%)}
+.install-banner:hover{background:#f9f7f2}
+.install-banner-icon{display:grid;width:38px;height:38px;place-items:center;border-radius:11px;background:var(--lime);color:var(--ink)}
+.install-banner-icon .ui-icon{--icon-size:18px}
+.install-banner-copy{display:grid;gap:1px}
+.install-banner-copy b{font-size:.82rem}
+.install-banner-copy small{color:var(--muted);font-size:.68rem}
+.install-banner>.ui-icon{--icon-size:16px}
+.install-help{display:grid;gap:14px}
+.install-help-icon{display:grid;width:54px;height:54px;place-items:center;border-radius:16px;background:#fff0eb;color:var(--paprika)}
+.install-help-icon .ui-icon{--icon-size:26px}
+.install-help p{margin:0;color:var(--muted);line-height:1.55}
+.install-help ol{display:grid;gap:8px;margin:0;padding-left:22px;color:var(--ink)}
+.install-help-note{border-radius:14px;background:#edf4e8;padding:12px;color:#37662a!important;font-size:.82rem}
+@media(max-width:620px){
+  .install-banner{width:100%;max-width:none;margin:-2px 0 12px;border-radius:15px}
+}
+
+
+/* v22 hero recipe path */
+.signal-actions{position:relative;z-index:2;display:grid;gap:10px;min-width:260px}
+.signal-recipe-button{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:10px;border-radius:20px;background:#fff;padding:8px 14px 8px 8px;color:var(--ink);text-align:left;box-shadow:0 10px 24px rgb(91 28 11/12%)}
+.signal-recipe-button>span{display:grid;width:42px;height:42px;place-items:center;border-radius:13px;background:#f3f0e9;color:var(--paprika)}
+.signal-recipe-button .ui-icon{--icon-size:20px}
+.signal-recipe-button b{font-size:.9rem}
+.signal-recipe-button:disabled{cursor:not-allowed;opacity:.58}
+.signal-actions .cook-now{width:100%;min-width:0}
+.recipe-active-filter{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;margin:-2px 0 14px;border-radius:999px;background:#fff0eb;padding:7px 8px 7px 11px;color:#8f3925;font-size:.78rem;font-weight:800}
+.recipe-active-filter>.ui-icon{--icon-size:15px}
+.recipe-active-filter span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recipe-active-filter button{display:grid;width:26px;height:26px;flex:0 0 26px;place-items:center;border-radius:999px;background:#fff;color:#8f3925}
+.recipe-active-filter button .ui-icon{--icon-size:13px}
+@media(max-width:900px){
+  .signal-actions{width:min(100%,330px);min-width:0}
+}
+@media(max-width:620px){
+  .signal-actions{grid-template-columns:1fr 1.35fr;width:100%;gap:8px}
+  .signal-recipe-button{grid-template-columns:34px minmax(0,1fr);gap:7px;padding:6px 9px 6px 6px;border-radius:17px}
+  .signal-recipe-button>span{width:34px;height:34px;border-radius:11px}
+  .signal-recipe-button .ui-icon{--icon-size:17px}
+  .signal-recipe-button b{font-size:.76rem;line-height:1.05}
+  .signal-actions .cook-now{grid-template-columns:34px minmax(0,1fr) 14px;padding:6px 8px 6px 6px;border-radius:17px}
+  .signal-actions .cook-now>span{width:34px;height:34px;border-radius:11px}
+  .signal-actions .cook-now .ui-icon{--icon-size:17px}
+  .signal-actions .cook-now b{font-size:.78rem}
+}

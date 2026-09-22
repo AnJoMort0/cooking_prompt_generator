@@ -62,6 +62,9 @@ function App() {
     const [editingItem, setEditingItem] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
+    const [showInstallHelp, setShowInstallHelp] = useState(false);
+    const [installPrompt, setInstallPrompt] = useState(null);
+    const [installedPwa, setInstalledPwa] = useState(() => window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone === true);
     const [showPromptDefaults, setShowPromptDefaults] = useState(false);
     const [showTransfer, setShowTransfer] = useState(false);
     const [incomingTransfer, setIncomingTransfer] = useState(null);
@@ -72,6 +75,7 @@ function App() {
     const [showRecipeImport, setShowRecipeImport] = useState(false);
     const [selectedRecipeId, setSelectedRecipeId] = useState(null);
     const [recipeQuery, setRecipeQuery] = useState("");
+    const [recipeIngredientFilter, setRecipeIngredientFilter] = useState("");
     const [recipeAvailabilityFilter, setRecipeAvailabilityFilter] = useState("all");
     const [recipeTagFilter, setRecipeTagFilter] = useState("all");
     const [recipeSort, setRecipeSort] = useState("newest");
@@ -82,6 +86,20 @@ function App() {
     const importRef = useRef(null);
     useEffect(() => saveState(state), [state]);
     useEffect(() => { const on = () => setOnline(true), off = () => setOnline(false); window.addEventListener("online", on); window.addEventListener("offline", off); return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); }; }, []);
+    useEffect(() => {
+        const beforeInstall = event => { event.preventDefault(); setInstallPrompt(event); };
+        const installed = () => { setInstalledPwa(true); setInstallPrompt(null); };
+        const media = window.matchMedia?.("(display-mode: standalone)");
+        const mediaChanged = event => setInstalledPwa(Boolean(event.matches) || window.navigator.standalone === true);
+        window.addEventListener("beforeinstallprompt", beforeInstall);
+        window.addEventListener("appinstalled", installed);
+        media?.addEventListener?.("change", mediaChanged);
+        return () => {
+            window.removeEventListener("beforeinstallprompt", beforeInstall);
+            window.removeEventListener("appinstalled", installed);
+            media?.removeEventListener?.("change", mediaChanged);
+        };
+    }, []);
     const notify = (message) => { setToast(message); window.setTimeout(() => setToast(""), 1800); };
     useEffect(() => {
         const token = transferTokenFromLocation();
@@ -172,11 +190,23 @@ function App() {
         const rank = item => hasStatus(item, "expiring") ? 0 : hasStatus(item, "leftover") && !hasStatus(item, "frozen") ? 1 : hasStatus(item, "open") ? 2 : 3;
         return rank(a) - rank(b) || a.updatedAt - b.updatedAt;
     }), [state.stock]);
+    const highlightedIngredient = useFirst[0] || null;
+    const highlightedRecipeCount = highlightedIngredient ? usageCount(highlightedIngredient.name, state.recipes) : 0;
+    const showHighlightedRecipes = () => {
+        if (!highlightedIngredient) return;
+        setRecipeQuery("");
+        setRecipeIngredientFilter(highlightedIngredient.name);
+        setRecipeAvailabilityFilter("all");
+        setRecipeTagFilter("all");
+        setTab("recipes");
+    };
     const visibleStock = useMemo(() => state.stock.filter(item => (categoryFilter === "all" || categoryFilter === "unsorted" ? categoryFilter !== "unsorted" || !item.categoryId : item.categoryId === categoryFilter) && (statusFilter === "all" || (statusFilter === "out" ? item.quantity === 0 : hasStatus(item, statusFilter))) && normalise(item.name).includes(normalise(query))).sort((a, b) => (a.quantity === 0 ? 1 : 0) - (b.quantity === 0 ? 1 : 0) || a.name.localeCompare(b.name)), [state.stock, categoryFilter, statusFilter, query]);
     const recipeTags = useMemo(() => Array.from(new Set(state.recipes.flatMap(recipe => recipe.tags || []).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [state.recipes]);
     const visibleRecipes = useMemo(() => state.recipes.filter(recipe => {
         const availability = recipeAvailability(recipe, state.stock);
-        if (recipeQuery && !normalise(`${recipe.title} ${recipe.cuisine || ""} ${(recipe.tags || []).join(" ")}`).includes(normalise(recipeQuery))) return false;
+        const ingredientText = recipeIngredientObjects(recipe).map(ingredient => ingredient.name).join(" ");
+        if (recipeQuery && !normalise(`${recipe.title} ${recipe.cuisine || ""} ${(recipe.tags || []).join(" ")} ${ingredientText}`).includes(normalise(recipeQuery))) return false;
+        if (recipeIngredientFilter && !recipeIngredientObjects(recipe).some(ingredient => matchesName(ingredient.name, recipeIngredientFilter))) return false;
         if (recipeAvailabilityFilter === "ready" && !availability.ready) return false;
         if (recipeAvailabilityFilter === "missing" && availability.ready) return false;
         if (recipeAvailabilityFilter === "prep" && normalise(recipe.mode) !== "prep ahead") return false;
@@ -188,7 +218,7 @@ function App() {
         if (recipeSort === "cooked") return Number(b.timesCooked || 0) - Number(a.timesCooked || 0) || Number(b.createdAt) - Number(a.createdAt);
         if (recipeSort === "az") return a.title.localeCompare(b.title);
         return Number(b.createdAt) - Number(a.createdAt);
-    }), [state.recipes, state.stock, recipeQuery, recipeAvailabilityFilter, recipeTagFilter, recipeSort]);
+    }), [state.recipes, state.stock, recipeQuery, recipeIngredientFilter, recipeAvailabilityFilter, recipeTagFilter, recipeSort]);
     const selectedRecipe = state.recipes.find(recipe => recipe.id === selectedRecipeId) || null;
     const prompt = useMemo(() => makePrompt(state, tone), [state, tone]);
     const addStock = (event) => { event.preventDefault(); if (!newItem.name.trim())
@@ -310,6 +340,18 @@ function App() {
         notify(`Data merged · ${added} new · ${updated} matched`);
     };
     const dismissIncomingTransfer = () => { setIncomingTransfer(null); clearTransferHash(); };
+    const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const canOfferInstall = !installedPwa && (Boolean(installPrompt) || isiOS);
+    const installApp = async () => {
+        if (!installPrompt) { setShowInstallHelp(true); return; }
+        try {
+            await installPrompt.prompt();
+            const choice = await installPrompt.userChoice;
+            if (choice?.outcome === "accepted") notify("Mise is being installed");
+            setInstallPrompt(null);
+        }
+        catch { setShowInstallHelp(true); }
+    };
     return h("main", null,
         h("div", { className: "app-shell" },
             h("header", { className: "topbar" },
@@ -329,6 +371,10 @@ function App() {
                     h("button", { className: "primary-button", onClick: () => setShowAdd(true), "aria-label": "Add stock" },
                         h(Plus, null),
                         "Add stock"))),
+            canOfferInstall && h("button", { className: "install-banner", onClick: installApp, "aria-label": "Install Mise app" },
+                h("span", { className: "install-banner-icon" }, h(Download, null)),
+                h("span", { className: "install-banner-copy" }, h("b", null, "Install Mise"), h("small", null, isiOS && !installPrompt ? "Add it to your Home Screen" : "Open it like a normal app")),
+                h(ChevronRight, null)),
             h("nav", { className: "desktop-nav", "aria-label": "Main navigation" },
                 h(NavButton, { active: tab === "stock", onClick: () => setTab("stock"), icon: h(Box, null), label: "Stock" }),
                 h(NavButton, { active: tab === "shopping", onClick: () => setTab("shopping"), icon: h(ShoppingBasket, null), label: "Shopping", count: state.shopping.length }),
@@ -347,12 +393,16 @@ function App() {
                             "Your kitchen is",
                             h("br", null),
                             h("em", null, "ready."))),
-                        h("p", null, useFirst[0] ? `${hasStatus(useFirst[0], "expiring") ? "Near expiry" : hasStatus(useFirst[0], "leftover") ? "Leftover" : "Already open"} · ${usageCount(useFirst[0].name, state.recipes)} saved recipe matches` : "Nothing urgent. Explore your stock or build a cooking brief.")),
-                    h("button", { className: "cook-now", onClick: () => setTab("cook") },
-                        h("span", null,
-                            h(Sparkles, null)),
-                        h("b", null, "Make me a plan"),
-                        h(ChevronRight, null)),
+                        h("p", null, highlightedIngredient ? `${hasStatus(highlightedIngredient, "expiring") ? "Near expiry" : hasStatus(highlightedIngredient, "leftover") ? "Leftover" : "Already open"} · ${highlightedRecipeCount} saved recipe match${highlightedRecipeCount === 1 ? "" : "es"}` : "Nothing urgent. Explore your stock or build a cooking brief.")),
+                    h("div", { className: "signal-actions" },
+                        h("button", { className: "signal-recipe-button", onClick: showHighlightedRecipes, disabled: !highlightedRecipeCount, title: highlightedRecipeCount ? `See recipes using ${highlightedIngredient?.name || "this ingredient"}` : "No saved recipes use this ingredient yet" },
+                            h("span", null, h(BookOpen, null)),
+                            h("b", null, highlightedRecipeCount ? "See recipes" : "No saved recipes")),
+                        h("button", { className: "cook-now", onClick: () => setTab("cook") },
+                            h("span", null,
+                                h(Sparkles, null)),
+                            h("b", null, "Let him cook"),
+                            h(ChevronRight, null))),
                     h("div", { className: "signal-orbit" })),
                 h("div", { className: "insight-grid" },
                     h(Insight, { icon: h(PackageOpen, null), label: "Use first", value: useFirst[0]?.name || "All clear", meta: useFirst.length ? `${useFirst.length} use-soon or leftover` : "No urgent items" }),
@@ -451,7 +501,7 @@ function App() {
                         h("p", null, state.recipes.length ? `${state.recipes.length} saved recipe${state.recipes.length === 1 ? "" : "s"} · availability updates with your stock` : "Save recipes as structured cards you can actually cook from.")),
                     h("button", { className: "primary-button", onClick: () => setShowRecipeImport(true) }, h(ClipboardPaste, null), "Import recipe")),
                 h("div", { className: "recipe-toolbar" },
-                    h("label", { className: "recipe-search" }, h(Search, null), h("input", { value: recipeQuery, onChange: e => setRecipeQuery(e.target.value), placeholder: "Find recipe or tag", "aria-label": "Find recipe" }), recipeQuery && h("button", { type: "button", onClick: () => setRecipeQuery(""), "aria-label": "Clear recipe search" }, h(X, null))),
+                    h("label", { className: "recipe-search" }, h(Search, null), h("input", { value: recipeQuery, onChange: e => setRecipeQuery(e.target.value), placeholder: "Find recipe, ingredient or tag", "aria-label": "Find recipe" }), recipeQuery && h("button", { type: "button", onClick: () => setRecipeQuery(""), "aria-label": "Clear recipe search" }, h(X, null))),
                     h("select", { value: recipeAvailabilityFilter, onChange: e => setRecipeAvailabilityFilter(e.target.value), "aria-label": "Filter recipes by availability" },
                         h("option", { value: "all" }, "All availability"),
                         h("option", { value: "ready" }, "Ready now"),
@@ -466,6 +516,10 @@ function App() {
                         h("option", { value: "match" }, "Best stock match"),
                         h("option", { value: "cooked" }, "Most cooked"),
                         h("option", { value: "az" }, "A–Z"))),
+                recipeIngredientFilter && h("div", { className: "recipe-active-filter" },
+                    h(BookOpen, null),
+                    h("span", null, "Using ", h("b", null, recipeIngredientFilter)),
+                    h("button", { onClick: () => setRecipeIngredientFilter(""), "aria-label": `Clear ${recipeIngredientFilter} recipe filter`, title: "Clear ingredient filter" }, h(X, null))),
                 h("div", { className: "recipe-list recipe-grid" }, visibleRecipes.length ? visibleRecipes.map(recipe => h(RecipeCard, { key: recipe.id, recipe, state, onOpen: () => setSelectedRecipeId(recipe.id) })) : h(Empty, { icon: h(BookOpen, null), title: state.recipes.length ? "No recipes match" : "No saved recipes", text: state.recipes.length ? "Try another filter." : "Import a generated recipe and Mise will turn it into a useful recipe card." }))),
             tab === "cook" && h("section", { className: "page cook-page" },
                 h("div", { className: "cook-intro" },
@@ -516,6 +570,7 @@ function App() {
             h(NavButton, { active: tab === "recipes", onClick: () => setTab("recipes"), icon: h(BookOpen, null), label: "Recipes" }),
             h(NavButton, { active: tab === "cook", onClick: () => setTab("cook"), icon: h(Sparkles, null), label: "Cook" })),
         showHelp && h(HelpModal, { onClose: () => setShowHelp(false), onEditPrompt: () => { setShowHelp(false); setShowPromptDefaults(true); } }),
+        showInstallHelp && h(InstallHelpModal, { onClose: () => setShowInstallHelp(false), isiOS }),
         showPromptDefaults && h(PromptDefaultsModal, { value: state.promptTemplate || defaultPromptTemplate(), onClose: () => setShowPromptDefaults(false), onSave: template => { setState(current => ({ ...current, promptTemplate: normalisePromptTemplate(template), activity: [activity("prompt", "Default cooking prompt updated"), ...current.activity].slice(0, 100) })); setShowPromptDefaults(false); notify("Default prompt saved"); } }),
         showAdd && h(Modal, { title: "Add to stock", onClose: () => setShowAdd(false) },
             h("form", { className: "form-grid", onSubmit: addStock },
@@ -826,6 +881,23 @@ function TransferImportModal({ payload, onMerge, onClose }) {
                 h("button", { className: "soft-button", onClick: onClose }, "Cancel"),
                 h("button", { className: "primary-button", onClick: onMerge }, h(GitMerge, null), "Merge into this device"))));
 }
+function InstallHelpModal({ onClose, isiOS }) {
+    return h(Modal, { title: "Install Mise", onClose },
+        h("div", { className: "install-help" },
+            h("div", { className: "install-help-icon" }, h(Smartphone, null)),
+            isiOS ? h(Fragment, null,
+                h("p", null, "On iPhone or iPad, Mise is installed from the browser's Share menu."),
+                h("ol", null,
+                    h("li", null, "Open Mise in Safari."),
+                    h("li", null, "Tap the Share button."),
+                    h("li", null, "Choose Add to Home Screen."),
+                    h("li", null, "Tap Add."))) : h(Fragment, null,
+                h("p", null, "Your browser is not offering the automatic install prompt right now."),
+                h("p", null, "Look in the browser menu for Install app, Add to Home screen, or a similar option. If you just opened Mise for the first time, refresh once after the page finishes loading.")),
+            h("p", { className: "install-help-note" }, "Your kitchen data stays in this browser profile. Installing the PWA does not upload your stock or recipes."),
+            h("div", { className: "modal-actions" }, h("button", { className: "primary-button", onClick: onClose }, "Got it"))));
+}
+
 function HelpModal({ onClose, onEditPrompt }) {
     return h(Modal, { title: "How to use Mise", onClose, wide: true },
         h("div", { className: "help-guide" },
