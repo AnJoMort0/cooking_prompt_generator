@@ -193,11 +193,33 @@ function recipeTitle(text) {
 }
 function recipeIngredientObjects(recipe) {
     return (Array.isArray(recipe?.ingredients) ? recipe.ingredients : []).map(value => {
-        if (value && typeof value === "object") return { name: String(value.name || "Ingredient"), source: String(value.source || "stock").toLowerCase() === "buy" ? "buy" : "stock", quantity: value.quantity == null || value.quantity === "" ? null : Number(value.quantity), unit: String(value.unit || ""), amountText: String(value.amountText || "") };
-        return { name: String(value || "Ingredient"), source: "stock", quantity: null, unit: "", amountText: "" };
+        if (value && typeof value === "object") return {
+            name: String(value.name || "Ingredient"),
+            source: String(value.source || "stock").toLowerCase() === "buy" ? "buy" : "stock",
+            stockId: value.stockId ? String(value.stockId) : null,
+            quantity: value.quantity == null || value.quantity === "" ? null : Number(value.quantity),
+            unit: String(value.unit || ""),
+            amountText: String(value.amountText || "")
+        };
+        return { name: String(value || "Ingredient"), source: "stock", stockId: null, quantity: null, unit: "", amountText: "" };
     }).filter(item => item.name.trim());
 }
 function ingredientNames(recipe) { return recipeIngredientObjects(recipe).map(item => item.name); }
+function findRecipeStockItem(ingredient, stock) {
+    const list = Array.isArray(stock) ? stock : [];
+    if (ingredient?.stockId) {
+        const byId = list.find(item => String(item.id) === String(ingredient.stockId));
+        if (byId) return byId;
+    }
+    return list.find(item => matchesName(item.name, ingredient?.name || "")) || null;
+}
+function linkRecipeIngredientsToStock(recipe, stock) {
+    return recipeIngredientObjects(recipe).map(ingredient => {
+        if (ingredient.source === "buy") return { ...ingredient, stockId: null };
+        const item = findRecipeStockItem(ingredient, stock);
+        return item ? { ...ingredient, source: "stock", stockId: item.id, name: item.name } : { ...ingredient, stockId: ingredient.stockId || null };
+    });
+}
 function parseRecipeIngredients(text) { return parseSingleRecipe(text).ingredients; }
 
 function parseDuration(value) {
@@ -302,6 +324,7 @@ function structuredRecipe(value) {
         return {
             name: String(item?.name || "").trim(),
             source: String(item?.source || "stock").toLowerCase() === "buy" ? "buy" : "stock",
+            stockId: item?.stockId ? String(item.stockId) : null,
             quantity,
             unit: String(item?.unit || "").trim(),
             amountText: quantity == null ? String(item?.amountText || "") : `${item.quantity}${item?.unit ? ` ${item.unit}` : ""}`.trim()
@@ -475,8 +498,8 @@ function frequentBuys(state) { return state.stock.map(item => ({ item, count: an
 function recipeAvailability(recipe, stock) {
     const ingredients = recipeIngredientObjects(recipe);
     const entries = ingredients.map(ingredient => {
-        const item = stock.find(candidate => candidate.quantity > 0 && matchesName(candidate.name, ingredient.name));
-        if (!item) return { ingredient, item: null, state: "missing", requiredInStockUnit: null };
+        const item = findRecipeStockItem(ingredient, stock);
+        if (!item || Number(item.quantity) <= 0) return { ingredient, item: item || null, state: "missing", requiredInStockUnit: null };
         if (ingredient.quantity == null) return { ingredient, item, state: "available", requiredInStockUnit: null };
         const converted = convertQuantity(ingredient.quantity, ingredient.unit, item.unit);
         if (converted == null) return { ingredient, item, state: "available", requiredInStockUnit: null };
@@ -495,7 +518,8 @@ function consumeRecipeStock(recipe, stock) {
     let consumed = 0, skipped = 0, depleted = 0;
     const next = stock.map(item => ({ ...item, statuses: itemStatuses(item) }));
     ingredients.forEach(ingredient => {
-        const index = next.findIndex(item => item.quantity > 0 && matchesName(item.name, ingredient.name));
+        const linked = findRecipeStockItem(ingredient, next);
+        const index = linked ? next.findIndex(item => item.id === linked.id && Number(item.quantity) > 0) : -1;
         if (index < 0 || ingredient.quantity == null) { skipped += 1; return; }
         const item = next[index];
         const required = convertQuantity(ingredient.quantity, ingredient.unit, item.unit);
@@ -730,7 +754,7 @@ STEPS:`;
                 activeMinutes: Number(recipe?.activeMinutes || reparsed.activeMinutes) || null,
                 totalMinutes: Number(recipe?.totalMinutes || reparsed.totalMinutes) || null,
                 leadTime: String(recipe?.leadTime || reparsed.leadTime || "none"),
-                ingredients: existingIngredients.length ? existingIngredients : reparsed.ingredients,
+                ingredients: linkRecipeIngredientsToStock({ ingredients: existingIngredients.length ? existingIngredients : reparsed.ingredients }, stock),
                 steps: existingSteps.length ? existingSteps : reparsed.steps,
                 text: String(recipe?.text || reparsed.text || ""),
                 createdAt: Number(recipe?.createdAt || Date.now()),
@@ -989,7 +1013,12 @@ function applyTransferredState(currentState, rawPayload, options = {}) {
     }
 
     if (selected.has("recipes")) {
-        const prepRecipe = recipe => ({ ...recipe, ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : [] });
+        const prepRecipe = recipe => {
+            /* Stock IDs are device-local. Re-link transferred recipe ingredients
+               by their human-facing names on the receiving device. */
+            const portable = { ...recipe, ingredients: recipeIngredientObjects(recipe).map(ingredient => ({ ...ingredient, stockId: null })) };
+            return { ...recipe, ingredients: linkRecipeIngredientsToStock(portable, next.stock), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : [] };
+        };
         if (mode === "replace") {
             next.recipes = (incoming.recipes || []).map(recipe => ({ ...prepRecipe(recipe), id: recipe.id || uuid() }));
             summary.replaced.push("recipes");
@@ -1011,8 +1040,11 @@ function applyTransferredState(currentState, rawPayload, options = {}) {
             summary.added += merged.added; summary.updated += merged.updated;
         }
     } else if (selected.has("stock")) {
-        /* Keep receiver shopping links valid after stock IDs change/relink. */
+        /* Keep receiver links valid after stock IDs change/relink. */
         next.shopping = (next.shopping || []).map(item => linkShoppingItem(item, next.stock));
+    }
+    if (selected.has("stock") && !selected.has("recipes")) {
+        next.recipes = (next.recipes || []).map(recipe => ({ ...recipe, ingredients: linkRecipeIngredientsToStock(recipe, next.stock) }));
     }
 
     if (selected.has("prompt")) {

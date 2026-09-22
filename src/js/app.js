@@ -74,6 +74,7 @@ function App() {
     const [shoppingImport, setShoppingImport] = useState("");
     const [recipeDraft, setRecipeDraft] = useState("");
     const [showRecipeImport, setShowRecipeImport] = useState(false);
+    const [recipeEditorRecipe, setRecipeEditorRecipe] = useState(null);
     const [selectedRecipeId, setSelectedRecipeId] = useState(null);
     const [recipeQuery, setRecipeQuery] = useState("");
     const [recipeIngredientFilter, setRecipeIngredientFilter] = useState("");
@@ -235,6 +236,52 @@ function App() {
         setSelectedRecipeId(recipes[0].id);
         notify(incomplete.length ? `${recipes.length} imported · ${incomplete.length} skipped` : `${recipes.length} recipe${recipes.length === 1 ? "" : "s"} imported`);
     };
+    const saveManualRecipe = (draft) => {
+        const editing = Boolean(draft?.id);
+        const id = draft?.id || uuid();
+        setState(current => {
+            const previous = editing ? current.recipes.find(recipe => recipe.id === id) : null;
+            const ingredients = linkRecipeIngredientsToStock({ ingredients: draft.ingredients || [] }, current.stock);
+            const recipe = {
+                ...previous,
+                ...draft,
+                id,
+                title: String(draft.title || "Untitled recipe").trim().slice(0, 90),
+                mode: String(draft.mode || "").trim(),
+                cuisine: String(draft.cuisine || "").trim(),
+                tags: Array.isArray(draft.tags) ? draft.tags.map(String).map(tag => tag.trim()).filter(Boolean).slice(0, 8) : [],
+                servings: Number(draft.servings) || null,
+                activeMinutes: Number(draft.activeMinutes) || null,
+                totalMinutes: Number(draft.totalMinutes) || null,
+                leadTime: String(draft.leadTime || "none").trim() || "none",
+                ingredients,
+                steps: Array.isArray(draft.steps) ? draft.steps.map(String).map(step => step.trim()).filter(Boolean) : [],
+                createdAt: previous?.createdAt || draft.createdAt || Date.now(),
+                timesCooked: Number(previous?.timesCooked ?? draft.timesCooked ?? 0),
+                lastCookedAt: previous?.lastCookedAt ?? draft.lastCookedAt ?? null,
+                text: JSON.stringify({
+                    title: String(draft.title || "Untitled recipe").trim(),
+                    mode: String(draft.mode || "").trim(),
+                    cuisine: String(draft.cuisine || "").trim(),
+                    tags: Array.isArray(draft.tags) ? draft.tags : [],
+                    servings: Number(draft.servings) || null,
+                    activeMinutes: Number(draft.activeMinutes) || null,
+                    totalMinutes: Number(draft.totalMinutes) || null,
+                    leadTime: String(draft.leadTime || "none"),
+                    ingredients,
+                    steps: Array.isArray(draft.steps) ? draft.steps : []
+                }, null, 2)
+            };
+            return {
+                ...current,
+                recipes: previous ? current.recipes.map(item => item.id === id ? recipe : item) : [recipe, ...current.recipes],
+                activity: [activity("recipe", `${recipe.title} ${previous ? "updated" : "created manually"}`), ...current.activity].slice(0, 100)
+            };
+        });
+        setRecipeEditorRecipe(null);
+        setSelectedRecipeId(id);
+        notify(editing ? "Recipe updated" : "Recipe saved");
+    };
     const importShopping = () => {
         const items = parseShoppingItems(shoppingImport);
         if (!items.length) { notify("No shopping items found in that reply"); return; }
@@ -378,6 +425,10 @@ function App() {
                     updatedAt: Date.now()
                 } : item),
                 shopping: current.shopping.map(item => previous && (item.stockId === editingItem.id || normalise(item.name) === normalise(previous.name)) ? { ...item, name: nextName, stockId: editingItem.id, unit: item.unit || editingItem.unit.trim() } : item),
+                recipes: current.recipes.map(recipe => ({
+                    ...recipe,
+                    ingredients: recipeIngredientObjects(recipe).map(ingredient => previous && ingredient.source === "stock" && (ingredient.stockId === editingItem.id || normalise(ingredient.name) === normalise(previous.name)) ? { ...ingredient, name: nextName, stockId: editingItem.id } : ingredient)
+                })),
                 activity: [activity("stock", `${nextName} updated`), ...current.activity].slice(0, 100)
             };
         });
@@ -609,7 +660,9 @@ function App() {
                         h("span", { className: "eyebrow" }, h(BookOpen, null), " YOUR KEEPERS"),
                         h("h1", null, "Recipe library"),
                         h("p", null, state.recipes.length ? `${state.recipes.length} saved recipe${state.recipes.length === 1 ? "" : "s"} · availability updates with your stock` : "Save recipes as structured cards you can actually cook from.")),
-                    h("button", { className: "primary-button", onClick: () => setShowRecipeImport(true) }, h(ClipboardPaste, null), "Import recipe")),
+                    h("div", { className: "title-actions recipe-head-actions" },
+                        h("button", { className: "soft-button", onClick: () => setRecipeEditorRecipe({ id: null }) }, h(Plus, null), "New recipe"),
+                        h("button", { className: "primary-button", onClick: () => setShowRecipeImport(true) }, h(ClipboardPaste, null), "Import recipe"))),
                 h("div", { className: "recipe-toolbar" },
                     h("label", { className: "recipe-search" }, h(Search, null), h("input", { value: recipeQuery, onChange: e => setRecipeQuery(e.target.value), placeholder: "Find recipe, ingredient or tag", "aria-label": "Find recipe" }), recipeQuery && h("button", { type: "button", onClick: () => setRecipeQuery(""), "aria-label": "Clear recipe search" }, h(X, null))),
                     h("select", { value: recipeAvailabilityFilter, onChange: e => setRecipeAvailabilityFilter(e.target.value), "aria-label": "Filter recipes by availability" },
@@ -630,7 +683,7 @@ function App() {
                     h(BookOpen, null),
                     h("span", null, "Using ", h("b", null, recipeIngredientFilter)),
                     h("button", { onClick: () => setRecipeIngredientFilter(""), "aria-label": `Clear ${recipeIngredientFilter} recipe filter`, title: "Clear ingredient filter" }, h(X, null))),
-                h("div", { className: "recipe-list recipe-grid" }, visibleRecipes.length ? visibleRecipes.map(recipe => h(RecipeCard, { key: recipe.id, recipe, state, onOpen: () => setSelectedRecipeId(recipe.id) })) : h(Empty, { icon: h(BookOpen, null), title: state.recipes.length ? "No recipes match" : "No saved recipes", text: state.recipes.length ? "Try another filter." : "Import a generated recipe and Mise will turn it into a useful recipe card." }))),
+                h("div", { className: "recipe-list recipe-grid" }, visibleRecipes.length ? visibleRecipes.map(recipe => h(RecipeCard, { key: recipe.id, recipe, state, onOpen: () => setSelectedRecipeId(recipe.id) })) : h(Empty, { icon: h(BookOpen, null), title: state.recipes.length ? "No recipes match" : "No saved recipes", text: state.recipes.length ? "Try another filter." : "Create a recipe manually or import an AI reply and Mise will turn it into a useful recipe card." }))),
             tab === "cook" && h("section", { className: "page cook-page" },
                 h("div", { className: "cook-intro" },
                     h("span", { className: "eyebrow" },
@@ -746,7 +799,8 @@ function App() {
                 h("div", { className: "modal-actions" },
                     h("button", { className: "soft-button", onClick: () => setShowRecipeImport(false) }, "Cancel"),
                     h("button", { className: "primary-button", onClick: saveRecipe, disabled: !recipeDraft.trim() }, h(BookOpen, null), "Import")))),
-        selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
+        recipeEditorRecipe !== null && h(RecipeEditorModal, { recipe: recipeEditorRecipe?.id ? recipeEditorRecipe : null, stock: state.stock, categories: state.categories, onClose: () => setRecipeEditorRecipe(null), onSave: saveManualRecipe }),
+        selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onEdit: () => { setSelectedRecipeId(null); setRecipeEditorRecipe(selectedRecipe); }, onDelete: () => deleteRecipe(selectedRecipe) }),
         showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); }, onHelp: () => { setShowSettings(false); setShowHelp(true); }, onEditPromptDefaults: () => { setShowSettings(false); setShowPromptDefaults(true); } }),
         showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify, onReceive: payload => { setShowTransfer(false); setIncomingTransfer(payload); } }),
         incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onApply: options => applyIncomingTransfer(incomingTransfer, options), onClose: dismissIncomingTransfer }),
@@ -811,6 +865,130 @@ function ShoppingRow({ item, stockItem, onCheck, onAdjust, onUnitChange, onStock
         h("button", { className: "icon-button delete", onClick: onDelete, "aria-label": `Delete ${item.name}` },
             h(Trash2, null)));
 }
+function RecipeEditorModal({ recipe, stock, categories, onClose, onSave }) {
+    const [draft, setDraft] = useState(() => ({
+        id: recipe?.id || null,
+        title: recipe?.title || "",
+        mode: recipe?.mode || "",
+        cuisine: recipe?.cuisine || "",
+        tagsText: (recipe?.tags || []).join(", "),
+        servings: recipe?.servings ?? 1,
+        activeMinutes: recipe?.activeMinutes ?? "",
+        totalMinutes: recipe?.totalMinutes ?? "",
+        leadTime: recipe?.leadTime || "none",
+        ingredients: linkRecipeIngredientsToStock(recipe || { ingredients: [] }, stock),
+        steps: Array.isArray(recipe?.steps) ? recipe.steps.map(String) : [""] ,
+        createdAt: recipe?.createdAt || null,
+        timesCooked: recipe?.timesCooked || 0,
+        lastCookedAt: recipe?.lastCookedAt || null
+    }));
+    const [stockQuery, setStockQuery] = useState("");
+    const [error, setError] = useState("");
+    const categoryById = Object.fromEntries((categories || []).map(category => [category.id, category]));
+    const chosenStockIds = new Set((draft.ingredients || []).map(item => item.stockId).filter(Boolean));
+    const visibleStock = [...(stock || [])]
+        .filter(item => !stockQuery.trim() || normalise(`${item.name} ${categoryById[item.categoryId]?.name || ""}`).includes(normalise(stockQuery)))
+        .sort((a, b) => (Number(b.quantity > 0) - Number(a.quantity > 0)) || a.name.localeCompare(b.name));
+    const patchIngredient = (index, patch) => setDraft(current => ({ ...current, ingredients: current.ingredients.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }));
+    const removeIngredient = index => setDraft(current => ({ ...current, ingredients: current.ingredients.filter((_, itemIndex) => itemIndex !== index) }));
+    const addStockIngredient = item => {
+        if (chosenStockIds.has(item.id)) return;
+        setDraft(current => ({
+            ...current,
+            ingredients: [...current.ingredients, { source: "stock", stockId: item.id, name: item.name, quantity: null, unit: item.unit || "", amountText: "" }]
+        }));
+        setError("");
+    };
+    const addOtherIngredient = () => {
+        setDraft(current => ({ ...current, ingredients: [...current.ingredients, { source: "buy", stockId: null, name: "", quantity: null, unit: "", amountText: "" }] }));
+        setError("");
+    };
+    const patchStep = (index, value) => setDraft(current => ({ ...current, steps: current.steps.map((step, stepIndex) => stepIndex === index ? value : step) }));
+    const removeStep = index => setDraft(current => ({ ...current, steps: current.steps.filter((_, stepIndex) => stepIndex !== index) }));
+    const addStep = () => setDraft(current => ({ ...current, steps: [...current.steps, ""] }));
+    const save = event => {
+        event?.preventDefault?.();
+        const ingredients = (draft.ingredients || []).map(item => ({
+            ...item,
+            name: String(item.name || "").trim(),
+            quantity: item.quantity === "" || item.quantity == null ? null : Math.max(0, Number(item.quantity) || 0),
+            unit: String(item.unit || "").trim(),
+            amountText: ""
+        })).filter(item => item.name);
+        const steps = (draft.steps || []).map(step => String(step || "").trim()).filter(Boolean);
+        if (!draft.title.trim()) { setError("Give the recipe a name."); return; }
+        if (!ingredients.length) { setError("Add at least one ingredient."); return; }
+        if (!steps.length) { setError("Add at least one method step."); return; }
+        onSave({
+            id: draft.id,
+            title: draft.title.trim(),
+            mode: draft.mode,
+            cuisine: draft.cuisine,
+            tags: draft.tagsText.split(/[,;]+/).map(tag => tag.trim()).filter(Boolean),
+            servings: draft.servings,
+            activeMinutes: draft.activeMinutes,
+            totalMinutes: draft.totalMinutes,
+            leadTime: draft.leadTime,
+            ingredients,
+            steps,
+            createdAt: draft.createdAt,
+            timesCooked: draft.timesCooked,
+            lastCookedAt: draft.lastCookedAt
+        });
+    };
+    return h(Modal, { title: recipe?.id ? "Edit recipe" : "New recipe", onClose, wide: true },
+        h("form", { className: "recipe-editor", onSubmit: save },
+            h("div", { className: "recipe-editor-basics" },
+                h("label", { className: "recipe-editor-title" }, h("span", null, "Recipe name"), h("input", { autoFocus: true, value: draft.title, onChange: event => setDraft({ ...draft, title: event.target.value }), placeholder: "e.g. Crispy mushroom rice" })),
+                h("label", null, h("span", null, "Style / mode"), h("input", { value: draft.mode, onChange: event => setDraft({ ...draft, mode: event.target.value }), placeholder: "Fast, Medium, Prep ahead…" })),
+                h("label", null, h("span", null, "Cuisine"), h("input", { value: draft.cuisine, onChange: event => setDraft({ ...draft, cuisine: event.target.value }), placeholder: "Italian, Japanese, mixed…" })),
+                h("label", null, h("span", null, "Servings"), h("input", { type: "number", min: "1", step: "1", value: draft.servings, onChange: event => setDraft({ ...draft, servings: event.target.value }) })),
+                h("label", null, h("span", null, "Active minutes"), h("input", { type: "number", min: "0", step: "1", value: draft.activeMinutes, onChange: event => setDraft({ ...draft, activeMinutes: event.target.value }) })),
+                h("label", null, h("span", null, "Total minutes"), h("input", { type: "number", min: "0", step: "1", value: draft.totalMinutes, onChange: event => setDraft({ ...draft, totalMinutes: event.target.value }) })),
+                h("label", null, h("span", null, "Lead time"), h("input", { value: draft.leadTime, onChange: event => setDraft({ ...draft, leadTime: event.target.value }), placeholder: "none, overnight, 24 hours…" })),
+                h("label", { className: "recipe-editor-tags" }, h("span", null, "Tags"), h("input", { value: draft.tagsText, onChange: event => setDraft({ ...draft, tagsText: event.target.value }), placeholder: "quick, freezer, spicy" }))),
+            h("div", { className: "recipe-editor-grid" },
+                h("section", { className: "recipe-editor-section ingredient-editor" },
+                    h("div", { className: "recipe-editor-section-head" },
+                        h("div", null, h("span", { className: "eyebrow" }, h(ListChecks, null), " INGREDIENTS"), h("h3", null, "What goes in it")),
+                        h("button", { type: "button", className: "soft-button compact-button", onClick: addOtherIngredient }, h(Plus, null), "Other ingredient")),
+                    h("p", { className: "recipe-editor-help" }, "Ingredients selected from Stock stay linked to that exact product, even if you rename it later."),
+                    h("div", { className: "ingredient-editor-list" }, draft.ingredients.length ? draft.ingredients.map((ingredient, index) => {
+                        const linked = ingredient.stockId ? stock.find(item => item.id === ingredient.stockId) : null;
+                        return h("div", { className: `ingredient-editor-row ${linked ? "linked" : "external"}`, key: `${ingredient.stockId || "other"}-${index}` },
+                            h("div", { className: "ingredient-editor-name" },
+                                h("span", { className: `ingredient-source-badge ${linked ? "stock" : "buy"}` }, linked ? "Stock" : "Other"),
+                                linked ? h("div", null, h("b", null, linked.name), h("small", null, `${formatQuantity(linked.quantity)}${linked.unit ? ` ${linked.unit}` : ""} currently in stock`)) : h("input", { value: ingredient.name, onChange: event => patchIngredient(index, { name: event.target.value }), placeholder: "Ingredient name", "aria-label": `Ingredient ${index + 1} name` })),
+                            h("label", null, h("span", null, "Amount"), h("input", { type: "number", min: "0", step: "any", value: ingredient.quantity ?? "", onChange: event => patchIngredient(index, { quantity: event.target.value === "" ? null : Number(event.target.value) }), placeholder: "—", "aria-label": `${ingredient.name || `Ingredient ${index + 1}`} amount` })),
+                            h("label", null, h("span", null, "Unit"), h("input", { value: ingredient.unit || "", onChange: event => patchIngredient(index, { unit: event.target.value }), placeholder: linked?.unit || "unit", "aria-label": `${ingredient.name || `Ingredient ${index + 1}`} unit` })),
+                            h("button", { type: "button", className: "icon-button ingredient-remove", onClick: () => removeIngredient(index), title: "Remove ingredient", "aria-label": `Remove ${ingredient.name || "ingredient"}` }, h(X, null)));
+                    }) : h("div", { className: "recipe-editor-empty" }, "Choose ingredients from your stock list, or add an ingredient you need to buy."))),
+                h("aside", { className: "recipe-stock-picker" },
+                    h("div", { className: "recipe-editor-section-head" }, h("div", null, h("span", { className: "eyebrow" }, h(Box, null), " YOUR STOCK"), h("h3", null, "Pick an ingredient"))),
+                    h("label", { className: "recipe-stock-search" }, h(Search, null), h("input", { value: stockQuery, onChange: event => setStockQuery(event.target.value), placeholder: "Search stock…", "aria-label": "Search stock ingredients" }), stockQuery ? h("button", { type: "button", onClick: () => setStockQuery(""), "aria-label": "Clear stock search" }, h(X, null)) : null),
+                    h("div", { className: "recipe-stock-scroll" }, visibleStock.length ? visibleStock.map(item => {
+                        const category = categoryById[item.categoryId];
+                        const selected = chosenStockIds.has(item.id);
+                        return h("button", { type: "button", className: `recipe-stock-option ${selected ? "selected" : ""}`, key: item.id, onClick: () => addStockIngredient(item), disabled: selected },
+                            h(CategoryGlyph, { category, size: 15 }),
+                            h("span", null, h("b", null, item.name), h("small", null, category?.name || "Unsorted")),
+                            h("strong", null, selected ? "Added" : `${formatQuantity(item.quantity)}${item.unit ? ` ${item.unit}` : ""}`),
+                            selected ? h(Check, null) : h(Plus, null));
+                    }) : h("div", { className: "recipe-editor-empty" }, "No stock items match that search.")))),
+            h("section", { className: "recipe-editor-section method-editor" },
+                h("div", { className: "recipe-editor-section-head" },
+                    h("div", null, h("span", { className: "eyebrow" }, h(ListOrdered, null), " METHOD"), h("h3", null, "Steps")),
+                    h("button", { type: "button", className: "soft-button compact-button", onClick: addStep }, h(Plus, null), "Add step")),
+                h("div", { className: "method-editor-list" }, draft.steps.map((step, index) => h("div", { className: "method-editor-row", key: index },
+                    h("span", null, index + 1),
+                    h("textarea", { value: step, rows: 2, onChange: event => patchStep(index, event.target.value), placeholder: `Step ${index + 1}` }),
+                    h("button", { type: "button", className: "icon-button", onClick: () => removeStep(index), disabled: draft.steps.length === 1, "aria-label": `Remove step ${index + 1}` }, h(X, null)))))),
+            error ? h("p", { className: "form-error recipe-editor-error" }, error) : null,
+            h("div", { className: "modal-actions recipe-editor-actions" },
+                h("button", { type: "button", className: "soft-button", onClick: onClose }, "Cancel"),
+                h("button", { type: "submit", className: "primary-button" }, h(Check, null), recipe?.id ? "Save changes" : "Save recipe"))));
+}
+
 function RecipeCard({ recipe, state, onOpen }) {
     const availability = recipeAvailability(recipe, state.stock);
     const tags = (recipe.tags || []).slice(0, 4);
@@ -832,7 +1010,7 @@ function RecipeCard({ recipe, state, onOpen }) {
             h(ChevronRight, null)));
 }
 
-function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
+function RecipeDetail({ recipe, state, onClose, onShop, onCook, onEdit, onDelete }) {
     const availability = recipeAvailability(recipe, state.stock);
     const tags = recipe.tags || [];
     const missingNames = [...availability.missing, ...availability.short];
@@ -863,6 +1041,7 @@ function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
                     h("div", { className: "recipe-section-title" }, h(ListOrdered, null), h("h3", null, "Method")),
                     recipe.steps?.length ? h("div", { className: "recipe-steps" }, recipe.steps.map((step, index) => h("div", { className: "recipe-step", key: index }, h("span", null, index + 1), h("p", null, step)))) : h("div", { className: "recipe-legacy-text" }, h("p", null, "This older recipe did not include structured steps."), recipe.text ? h("pre", null, recipe.text) : null))),
             h("div", { className: "recipe-detail-actions" },
+                h("button", { className: "soft-button", onClick: onEdit }, h(Pencil, null), "Edit recipe"),
                 missingNames.length ? h("button", { className: "soft-button", onClick: () => missingNames.forEach(onShop) }, h(ShoppingBasket, null), "Add missing to shopping") : null,
                 h("button", { className: "primary-button cooked-button", onClick: onCook }, h(Check, null), "I did this")),
             h("div", { className: "recipe-history" }, recipe.lastCookedAt ? `Cooked ${recipe.timesCooked || 1}× · last ${timeLabel(recipe.lastCookedAt)}` : "Not cooked yet in Mise"),
@@ -1063,8 +1242,8 @@ function HelpModal({ onClose, onEditPrompt }) {
                     h("h3", null, "5. Bring the reply back to Mise"),
                     h("p", null, "Copy the AI's whole reply. For recipes, open Recipes → Import recipe and paste it there. For the strategic shopping suggestions, open Shop → Paste AI list. You can paste the same complete AI reply; Mise extracts the part it needs.")),
                 h("section", null,
-                    h("h3", null, "6. Read and save the recipes"),
-                    h("p", null, "Recipe cards show time, tags and how much of the recipe your current stock can cover. Tap a card for the full ingredient list and step-by-step method. If something is missing, add it to Shopping; otherwise cook when you're ready.")),
+                    h("h3", null, "6. Read, edit or add recipes"),
+                    h("p", null, "Recipe cards show time, tags and how much of the recipe your current stock can cover. Tap a card for the full method, or use Edit recipe to change it. You can also tap New recipe to enter one yourself and pick ingredients directly from your Stock list.")),
                 h("section", null,
                     h("h3", null, "7. After cooking, tap ‘I did this’"),
                     h("p", null, "On a recipe page, I did this subtracts measurable ingredients from stock automatically. Mise understands compatible units such as ml/L and g/kg. If a quantity cannot be converted safely, it leaves that item alone instead of guessing.")),
