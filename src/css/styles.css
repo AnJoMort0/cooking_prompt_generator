@@ -1370,3 +1370,80 @@ button svg.lucide{pointer-events:none}
   .signal-actions .cook-now .ui-icon{--icon-size:17px}
   .signal-actions .cook-now b{font-size:.78rem}
 }
+
+/* v23 — shopping list is a stock-aware restock workflow */
+.shopping-row{
+  grid-template-columns:36px minmax(140px,1fr) auto auto 42px;
+}
+.shopping-name small{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:4px;
+  text-transform:none;
+}
+.stock-link-badge{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  border-radius:999px;
+  padding:3px 7px;
+  font-size:.62rem;
+  font-weight:900;
+  line-height:1;
+}
+.stock-link-badge.linked{background:#e4efdc;color:#3b6a2b}
+.stock-link-badge.unlinked{background:#fff0eb;color:#9c381f}
+.shopping-quantity{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+}
+.shopping-unit-input{
+  width:68px;
+  min-width:0;
+  height:34px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+  padding:0 8px;
+  color:var(--ink);
+  font-size:.75rem;
+  font-weight:800;
+}
+.shopping-unit-input::placeholder{color:#a0a39b;font-weight:700}
+.stock-button.add-product{background:var(--paprika)}
+.stock-button.add-product:hover{background:#cf4c2b}
+.stock-button.restock{background:var(--ink)}
+
+@media(max-width:760px){
+  .shopping-row{
+    grid-template-columns:34px minmax(0,1fr) auto;
+    grid-template-areas:
+      "check name delete"
+      ". qty action";
+    gap:9px 8px;
+    padding:11px 10px;
+  }
+  .shopping-row>.check-button{grid-area:check}
+  .shopping-row>.shopping-name{grid-area:name;min-width:0}
+  .shopping-row>.shopping-quantity{grid-area:qty;justify-self:start;max-width:100%}
+  .shopping-row>.stock-button{grid-area:action;justify-self:end}
+  .shopping-row>.delete{grid-area:delete;justify-self:end}
+  .shopping-unit-input{width:60px}
+}
+
+@media(max-width:390px){
+  .shopping-row{
+    grid-template-columns:32px minmax(0,1fr) 36px;
+  }
+  .shopping-row>.shopping-quantity{
+    gap:5px;
+  }
+  .shopping-unit-input{width:54px;padding-inline:6px}
+  .shopping-row>.stock-button{
+    min-width:76px;
+    padding-inline:9px;
+  }
+}

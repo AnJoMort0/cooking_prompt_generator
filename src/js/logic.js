@@ -35,6 +35,43 @@ function matchesName(a, b) {
     return left.length > 0 && left.every(t => right.has(t));
 }
 
+/* Shopping items can point at an existing stock record. Prefer an exact
+   normalised name; only use fuzzy matching when it produces one unambiguous
+   result, so "Rice" does not accidentally attach to the wrong rice product. */
+function findShoppingStock(item, stock) {
+    if (!item) return null;
+    if (item.stockId) {
+        const byId = (stock || []).find(product => product.id === item.stockId);
+        if (byId) return byId;
+    }
+    const key = normalise(item.name);
+    if (!key) return null;
+    const exact = (stock || []).find(product => normalise(product.name) === key);
+    if (exact) return exact;
+    const fuzzy = (stock || []).filter(product => matchesName(product.name, item.name));
+    return fuzzy.length === 1 ? fuzzy[0] : null;
+}
+function linkShoppingItem(item, stock) {
+    const product = findShoppingStock(item, stock);
+    return {
+        ...item,
+        stockId: product?.id || null,
+        unit: String(item?.unit || product?.unit || "")
+    };
+}
+function shoppingUnit(item, stock) {
+    return String(item?.unit || findShoppingStock(item, stock)?.unit || "");
+}
+function shoppingStep(item, stock) {
+    return defaultIncrementForUnit(shoppingUnit(item, stock));
+}
+function shoppingQuantityForStock(item, stockItem) {
+    if (!item || !stockItem) return null;
+    const fromUnit = String(item.unit || stockItem.unit || "");
+    const toUnit = String(stockItem.unit || fromUnit || "");
+    return convertQuantity(Number(item.quantity || 0), fromUnit, toUnit);
+}
+
 /* Quantity + unit intelligence. Base units are grams and millilitres. */
 const unitAliases = {
     milligram: "mg", milligrams: "mg", mg: "mg",
@@ -601,23 +638,31 @@ function makePrompt(state, tone) {
 
 function migrateLegacyStatuses(state) {
     if (!state || !Array.isArray(state.stock)) return state;
+    const stock = state.stock.map(item => {
+        const legacy = item.status === "low" || item.status === "fresh" || item.status === "ready" || item.status === "out" ? [] : itemStatuses(item);
+        const statuses = Array.isArray(item.statuses) ? itemStatuses(item) : legacy;
+        const { status: _legacyStatus, ...rest } = item;
+        return { ...rest, statuses, increment: itemIncrement(item) };
+    });
     return {
         ...state,
         promptTemplate: normalisePromptTemplate(state.promptTemplate),
-        stock: state.stock.map(item => {
-            const legacy = item.status === "low" || item.status === "fresh" || item.status === "ready" || item.status === "out" ? [] : itemStatuses(item);
-            const statuses = Array.isArray(item.statuses) ? itemStatuses(item) : legacy;
-            const { status: _legacyStatus, ...rest } = item;
-            return { ...rest, statuses, increment: itemIncrement(item) };
-        }),
+        stock,
+        shopping: (Array.isArray(state.shopping) ? state.shopping : []).map(item => linkShoppingItem({
+            ...item,
+            quantity: Math.max(1, Number(item?.quantity || 1)),
+            unit: String(item?.unit || ""),
+            checked: Boolean(item?.checked)
+        }, stock)),
         recipes: (Array.isArray(state.recipes) ? state.recipes : []).map((recipe, index) => {
-            const fallbackText = recipe?.text || `TITLE: ${recipe?.title || "Recipe"}\nINGREDIENTS:\n${(recipe?.ingredients || []).map(name => `- ${name}`).join("\n")}\nSTEPS:`;
+            const fallbackText = recipe?.text || `TITLE: ${recipe?.title || "Recipe"}
+INGREDIENTS:
+${(recipe?.ingredients || []).map(name => `- ${name}`).join("\n")}
+STEPS:`;
             const reparsed = parseSingleRecipe(fallbackText);
             const existingIngredients = recipeIngredientObjects(recipe);
             const existingSteps = Array.isArray(recipe?.steps) ? recipe.steps.map(String).filter(Boolean) : [];
             const existingTags = Array.isArray(recipe?.tags) ? recipe.tags.map(String).filter(Boolean) : [];
-            /* Repair recipes imported by older parsers. Preserve IDs/history,
-               but recover missing ingredients/steps/metadata from raw text. */
             return {
                 ...reparsed, ...recipe,
                 id: String(recipe?.id || `recipe-${index}`),
@@ -640,12 +685,11 @@ function migrateLegacyStatuses(state) {
     };
 }
 
-
 /* Device-to-device transfer. The payload is kept in the URL fragment, so it is
    never sent to GitHub Pages. Incoming data is merged by human-facing names:
    matching records update, new records are added, and receiver-only records stay. */
 const TRANSFER_PARAM = "mise-transfer";
-const TRANSFER_FALLBACK_URL = "https://anjomort0.github.io/cooking_prompt_generator/";
+const TRANSFER_FALLBACK_URL = "https://anjomort0.github.io/mise/";
 /* Keep QR/link transfers deliberately conservative. QR capacity and link handling
    vary a lot between camera apps, messengers and browsers; a transfer file is
    the reliable path once a snapshot grows beyond this. */
@@ -792,7 +836,7 @@ function mergeTransferredState(currentState, incomingState) {
     const recipeMerge = mergeNamedRecords(current.recipes, incoming.recipes, recipe => recipe.title, recipe => ({
         ...recipe, ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : []
     }));
-    const shoppingMerge = mergeNamedRecords(current.shopping, incoming.shopping, item => item.name, item => ({ ...item, quantity: Number(item.quantity || 1), checked: Boolean(item.checked) }));
+    const shoppingMerge = mergeNamedRecords(current.shopping, incoming.shopping, item => item.name, item => linkShoppingItem({ ...item, quantity: Number(item.quantity || 1), checked: Boolean(item.checked) }, stockMerge.records));
 
     const activityKey = entry => `${entry?.type || ""}|${entry?.label || ""}|${Number(entry?.at || 0)}`;
     const seenActivity = new Set();
@@ -850,7 +894,7 @@ function loadState() {
 }
 function saveState(state) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { } }
 function timeLabel(timestamp) { return humanAge(timestamp); }
-function newShoppingItem(name, source) { return { id: uuid(), name: name.trim(), quantity: 1, unit: "", checked: false, addedAt: Date.now(), source }; }
+function newShoppingItem(name, source, stockItem = null, quantity = 1, unit = "") { return { id: uuid(), name: name.trim(), quantity: Math.max(1, Number(quantity || 1)), unit: String(unit || stockItem?.unit || ""), stockId: stockItem?.id || null, checked: false, addedAt: Date.now(), source }; }
 
 const palette = ["#67a64a", "#d15336", "#5f91c9", "#c3903f", "#a45f91", "#e17833", "#3b9a9a", "#7b6bd1", "#db4f83"];
 const statusButtons = [

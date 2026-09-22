@@ -59,6 +59,7 @@ function App() {
     const [categoryFilter, setCategoryFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
     const [showAdd, setShowAdd] = useState(false);
+    const [shoppingToAddId, setShoppingToAddId] = useState(null);
     const [editingItem, setEditingItem] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
     const [showHelp, setShowHelp] = useState(false);
@@ -109,7 +110,29 @@ function App() {
         return () => { cancelled = true; };
     }, []);
     const activity = (type, label) => ({ id: uuid(), type, label, at: Date.now() });
-    const addToShopping = (name, source = "manual") => setState(current => { const existing = current.shopping.find(item => matchesName(item.name, name)); const shopping = existing ? current.shopping.map(item => item.id === existing.id ? { ...item, quantity: item.quantity + 1, addedAt: Date.now(), checked: false } : item) : [newShoppingItem(name, source), ...current.shopping]; return { ...current, shopping, analytics: bumpAnalytics(current, name, "shop"), activity: [activity("shop", `${name} added to shopping`), ...current.activity].slice(0, 100) }; });
+    const addToShopping = (name, source = "manual", quantity = 1, unit = "") => setState(current => {
+        const stockItem = findShoppingStock({ name }, current.stock);
+        const targetUnit = String(unit || stockItem?.unit || "");
+        const incomingQuantity = Math.max(1, Number(quantity || 1));
+        const existing = current.shopping.find(item => matchesName(item.name, name));
+        let shopping;
+        if (existing) {
+            shopping = current.shopping.map(item => {
+                if (item.id !== existing.id) return item;
+                const linked = stockItem || findShoppingStock(item, current.stock);
+                const preferredUnit = String(item.unit || targetUnit || linked?.unit || "");
+                let addition = incomingQuantity;
+                if (targetUnit && preferredUnit && normaliseUnit(targetUnit) !== normaliseUnit(preferredUnit)) {
+                    const converted = convertQuantity(incomingQuantity, targetUnit, preferredUnit);
+                    if (converted != null) addition = converted;
+                }
+                return { ...item, name: linked?.name || item.name, stockId: linked?.id || item.stockId || null, unit: preferredUnit, quantity: roundQuantity(Number(item.quantity || 0) + addition), addedAt: Date.now(), checked: false, source };
+            });
+        } else {
+            shopping = [newShoppingItem(stockItem?.name || name, source, stockItem, incomingQuantity, targetUnit), ...current.shopping];
+        }
+        return { ...current, shopping, analytics: bumpAnalytics(current, stockItem?.name || name, "shop"), activity: [activity("shop", `${stockItem?.name || name} added to shopping`), ...current.activity].slice(0, 100) };
+    });
     const adjustStock = (id, direction) => setState(current => ({ ...current, stock: current.stock.map(item => { if (item.id !== id)
             return item; const quantity = roundQuantity(Math.max(0, Number(item.quantity) + itemIncrement(item) * direction)); return { ...item, quantity, statuses: quantity === 0 ? [] : itemStatuses(item), updatedAt: Date.now() }; }) }));
     const toggleStatus = (id, status) => setState(current => {
@@ -122,9 +145,75 @@ function App() {
             activity: [activity("status", `${target?.name || "Item"} ${wasActive ? "unmarked" : "marked"} ${label}`), ...current.activity].slice(0, 100)
         };
     });
-    const adjustShopping = (id, amount) => setState(current => ({ ...current, shopping: current.shopping.map(item => item.id === id ? { ...item, quantity: Math.max(1, item.quantity + amount) } : item) }));
-    const stockShoppingItem = (shoppingItem) => setState(current => { const existing = current.stock.find(item => matchesName(item.name, shoppingItem.name)); const stock = existing ? current.stock.map(item => item.id === existing.id ? { ...item, quantity: roundQuantity(Number(item.quantity) + Number(shoppingItem.quantity)), statuses: itemStatuses(item), updatedAt: Date.now() } : item) : [{ id: uuid(), name: shoppingItem.name, quantity: shoppingItem.quantity, unit: shoppingItem.unit, increment: defaultIncrementForUnit(shoppingItem.unit), categoryId: inferCategory(shoppingItem.name, current.categories, current.stock), statuses: [], createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock]; return { ...current, stock, shopping: current.shopping.filter(item => item.id !== shoppingItem.id), analytics: bumpAnalytics(current, shoppingItem.name, "stock"), activity: [activity("stock", `${shoppingItem.quantity} ${shoppingItem.name} moved into stock`), ...current.activity].slice(0, 100) }; });
-    const stockChecked = () => { const checked = state.shopping.filter(i => i.checked); checked.forEach(stockShoppingItem); notify(`${checked.length} item${checked.length === 1 ? "" : "s"} stocked`); };
+    const adjustShopping = (id, direction) => setState(current => ({ ...current, shopping: current.shopping.map(item => {
+        if (item.id !== id) return item;
+        const step = shoppingStep(item, current.stock);
+        return { ...item, quantity: roundQuantity(Math.max(step, Number(item.quantity || step) + step * direction)) };
+    }) }));
+    const resetNewItem = () => setNewItem({ name: "", quantity: 1, unit: "", increment: 1, categoryId: state.categories[0]?.id || "", statuses: [] });
+    const openBlankAdd = () => { setShoppingToAddId(null); resetNewItem(); setShowAdd(true); };
+    const openAddFromShopping = (shoppingItem) => {
+        const unit = shoppingUnit(shoppingItem, state.stock);
+        setShoppingToAddId(shoppingItem.id);
+        setNewItem({
+            name: shoppingItem.name,
+            quantity: Math.max(0, Number(shoppingItem.quantity || 1)),
+            unit,
+            increment: defaultIncrementForUnit(unit),
+            categoryId: inferCategory(shoppingItem.name, state.categories, state.stock) || "",
+            statuses: []
+        });
+        setShowAdd(true);
+    };
+    const stockShoppingItem = (shoppingItem) => {
+        const existing = findShoppingStock(shoppingItem, state.stock);
+        if (!existing) { openAddFromShopping(shoppingItem); return; }
+        const amount = shoppingQuantityForStock(shoppingItem, existing);
+        if (amount == null) { notify(`Can't convert ${shoppingItem.unit || "that unit"} to ${existing.unit || "the stock unit"}. Edit the item first.`); return; }
+        setState(current => {
+            const target = findShoppingStock(shoppingItem, current.stock);
+            if (!target) return current;
+            const converted = shoppingQuantityForStock(shoppingItem, target);
+            if (converted == null) return current;
+            return {
+                ...current,
+                stock: current.stock.map(item => item.id === target.id ? { ...item, quantity: roundQuantity(Number(item.quantity) + converted), statuses: itemStatuses(item), updatedAt: Date.now() } : item),
+                shopping: current.shopping.filter(item => item.id !== shoppingItem.id),
+                analytics: bumpAnalytics(current, target.name, "stock"),
+                activity: [activity("stock", `${formatQuantity(shoppingItem.quantity)}${shoppingItem.unit ? ` ${shoppingItem.unit}` : ""} ${target.name} restocked`), ...current.activity].slice(0, 100)
+            };
+        });
+        notify(`${existing.name} restocked`);
+    };
+    const stockChecked = () => {
+        const checked = state.shopping.filter(item => item.checked);
+        if (!checked.length) return;
+        let stocked = 0, needsSetup = 0, incompatible = 0;
+        setState(current => {
+            let next = current;
+            for (const original of checked) {
+                const shoppingItem = next.shopping.find(item => item.id === original.id);
+                if (!shoppingItem) continue;
+                const target = findShoppingStock(shoppingItem, next.stock);
+                if (!target) { needsSetup += 1; continue; }
+                const amount = shoppingQuantityForStock(shoppingItem, target);
+                if (amount == null) { incompatible += 1; continue; }
+                next = {
+                    ...next,
+                    stock: next.stock.map(item => item.id === target.id ? { ...item, quantity: roundQuantity(Number(item.quantity) + amount), statuses: itemStatuses(item), updatedAt: Date.now() } : item),
+                    shopping: next.shopping.filter(item => item.id !== shoppingItem.id),
+                    analytics: bumpAnalytics(next, target.name, "stock"),
+                    activity: [activity("stock", `${formatQuantity(shoppingItem.quantity)}${shoppingItem.unit ? ` ${shoppingItem.unit}` : ""} ${target.name} restocked`), ...next.activity].slice(0, 100)
+                };
+                stocked += 1;
+            }
+            return next;
+        });
+        const notes = [`${stocked} restocked`];
+        if (needsSetup) notes.push(`${needsSetup} need Add`);
+        if (incompatible) notes.push(`${incompatible} need unit check`);
+        notify(notes.join(" · "));
+    };
     const saveRecipe = () => {
         if (!recipeDraft.trim()) return;
         const parsed = parseRecipeBlocks(recipeDraft);
@@ -155,26 +244,26 @@ function App() {
             const activities = [];
             const now = Date.now();
             for (const incoming of items) {
-                const existing = shopping.find(item => matchesName(item.name, incoming.name));
+                const stockItem = findShoppingStock(incoming, current.stock);
+                const linkedName = stockItem?.name || incoming.name.trim();
+                const incomingUnitText = String(incoming.unit || stockItem?.unit || "");
+                const existing = shopping.find(item => matchesName(item.name, linkedName));
                 if (existing) {
                     shopping = shopping.map(item => {
                         if (item.id !== existing.id) return item;
-                        const existingUnit = normaliseUnit(item.unit);
-                        const incomingUnit = normaliseUnit(incoming.unit);
-                        let quantity = Number(item.quantity || 0);
-                        let unit = item.unit || incoming.unit || "";
-                        if (!existingUnit || !incomingUnit || existingUnit === incomingUnit) quantity = roundQuantity(quantity + Number(incoming.quantity || 1));
-                        else {
-                            const converted = convertQuantity(Number(incoming.quantity || 1), incoming.unit, item.unit);
-                            if (converted != null) quantity = roundQuantity(quantity + converted);
+                        const preferredUnit = String(item.unit || incomingUnitText || stockItem?.unit || "");
+                        let addition = Number(incoming.quantity || 1);
+                        if (incomingUnitText && preferredUnit && normaliseUnit(incomingUnitText) !== normaliseUnit(preferredUnit)) {
+                            const converted = convertQuantity(addition, incomingUnitText, preferredUnit);
+                            if (converted != null) addition = converted;
                         }
-                        return { ...item, quantity: Math.max(1, quantity), unit, checked: false, addedAt: now, source: "AI import" };
+                        return { ...item, name: linkedName, stockId: stockItem?.id || item.stockId || null, quantity: Math.max(1, roundQuantity(Number(item.quantity || 0) + addition)), unit: preferredUnit, checked: false, addedAt: now, source: "AI import" };
                     });
                 } else {
-                    shopping.unshift({ id: uuid(), name: incoming.name.trim(), quantity: Number(incoming.quantity || 1), unit: incoming.unit || "", checked: false, addedAt: now, source: "AI import" });
+                    shopping.unshift(newShoppingItem(linkedName, "AI import", stockItem, Number(incoming.quantity || 1), incomingUnitText));
                 }
-                analytics = bumpAnalytics({ ...current, analytics }, incoming.name, "shop", now);
-                activities.push(activity("shop", `${incoming.name} imported to shopping`));
+                analytics = bumpAnalytics({ ...current, analytics }, linkedName, "shop", now);
+                activities.push(activity("shop", `${linkedName} imported to shopping`));
             }
             return { ...current, shopping, analytics, activity: [...activities, ...current.activity].slice(0, 100) };
         });
@@ -221,8 +310,26 @@ function App() {
     }), [state.recipes, state.stock, recipeQuery, recipeIngredientFilter, recipeAvailabilityFilter, recipeTagFilter, recipeSort]);
     const selectedRecipe = state.recipes.find(recipe => recipe.id === selectedRecipeId) || null;
     const prompt = useMemo(() => makePrompt(state, tone), [state, tone]);
-    const addStock = (event) => { event.preventDefault(); if (!newItem.name.trim())
-        return; setState(current => ({ ...current, stock: [{ id: uuid(), name: newItem.name.trim(), quantity: Math.max(0, Number(newItem.quantity) || 0), unit: newItem.unit.trim(), increment: Number(newItem.increment) > 0 ? Number(newItem.increment) : defaultIncrementForUnit(newItem.unit), categoryId: newItem.categoryId || null, statuses: Number(newItem.quantity) === 0 ? [] : itemStatuses(newItem), createdAt: Date.now(), updatedAt: Date.now() }, ...current.stock], activity: [activity("stock", `${newItem.name.trim()} added to stock`), ...current.activity].slice(0, 100) })); setNewItem({ name: "", quantity: 1, unit: "", increment: 1, categoryId: state.categories[0]?.id || "", statuses: [] }); setShowAdd(false); notify("Added to stock"); };
+    const addStock = (event) => {
+        event.preventDefault();
+        if (!newItem.name.trim()) return;
+        const name = newItem.name.trim();
+        const quantity = Math.max(0, Number(newItem.quantity) || 0);
+        const unit = newItem.unit.trim();
+        setState(current => {
+            const created = { id: uuid(), name, quantity, unit, increment: Number(newItem.increment) > 0 ? Number(newItem.increment) : defaultIncrementForUnit(unit), categoryId: newItem.categoryId || null, statuses: quantity === 0 ? [] : itemStatuses(newItem), createdAt: Date.now(), updatedAt: Date.now() };
+            return {
+                ...current,
+                stock: [created, ...current.stock],
+                shopping: shoppingToAddId ? current.shopping.filter(item => item.id !== shoppingToAddId) : current.shopping,
+                activity: [activity("stock", `${name} added to stock`), ...current.activity].slice(0, 100)
+            };
+        });
+        setNewItem({ name: "", quantity: 1, unit: "", increment: 1, categoryId: state.categories[0]?.id || "", statuses: [] });
+        setShoppingToAddId(null);
+        setShowAdd(false);
+        notify(shoppingToAddId ? "Added to stock and cleared from shopping" : "Added to stock");
+    };
     const editStock = (item) => setEditingItem({ ...item, increment: itemIncrement(item), categoryId: item.categoryId || "", statuses: itemStatuses(item) });
     const deleteStockItem = () => {
         if (!editingItem || !window.confirm(`Delete ${editingItem.name} from stock? This cannot be undone.`)) return;
@@ -270,6 +377,7 @@ function App() {
                     statuses: nextStatuses,
                     updatedAt: Date.now()
                 } : item),
+                shopping: current.shopping.map(item => previous && (item.stockId === editingItem.id || normalise(item.name) === normalise(previous.name)) ? { ...item, name: nextName, stockId: editingItem.id, unit: item.unit || editingItem.unit.trim() } : item),
                 activity: [activity("stock", `${nextName} updated`), ...current.activity].slice(0, 100)
             };
         });
@@ -368,7 +476,7 @@ function App() {
                         h("span", null, "How to use")),
                     h("button", { className: "icon-button", onClick: () => setShowSettings(true), "aria-label": "Settings" },
                         h(Settings, null)),
-                    h("button", { className: "primary-button", onClick: () => setShowAdd(true), "aria-label": "Add stock" },
+                    h("button", { className: "primary-button", onClick: openBlankAdd, "aria-label": "Add stock" },
                         h(Plus, null),
                         "Add stock"))),
             canOfferInstall && h("button", { className: "install-banner", onClick: installApp, "aria-label": "Install Mise app" },
@@ -439,7 +547,7 @@ function App() {
                     h("button", { className: "manage-categories", onClick: () => setShowSettings(true) },
                         h(FolderCog, { size: 16 }),
                         h("span", null, "Manage"))),
-                visibleStock.length ? h("div", { className: "stock-grid" }, visibleStock.map(item => h(StockCard, { key: item.id, item: item, state: state, onAdjust: adjustStock, onStatus: toggleStatus, onShop: () => { addToShopping(item.name, "restock"); notify("Added to shopping"); }, onEdit: () => editStock(item) }))) : h(Empty, { icon: h(Search, null), title: "Nothing here", text: "Try another filter or add an ingredient." })),
+                visibleStock.length ? h("div", { className: "stock-grid" }, visibleStock.map(item => h(StockCard, { key: item.id, item: item, state: state, onAdjust: adjustStock, onStatus: toggleStatus, onShop: () => { addToShopping(item.name, "restock", 1, item.unit); notify("Added to shopping"); }, onEdit: () => editStock(item) }))) : h(Empty, { icon: h(Search, null), title: "Nothing here", text: "Try another filter or add an ingredient." })),
             tab === "shopping" && h("section", { className: "page panel-page" },
                 h("div", { className: "page-title" },
                     h("div", null,
@@ -454,7 +562,7 @@ function App() {
                             "Paste AI list"),
                         state.shopping.some(i => i.checked) && h("button", { className: "primary-button", onClick: stockChecked },
                             h(PackageCheck, null),
-                            "Stock bought"))),
+                            "Restock bought"))),
                 showImport && h("div", { className: "import-panel" },
                     h("div", null,
                         h("b", null, "Paste the AI reply or shopping block"),
@@ -480,7 +588,7 @@ function App() {
                         item.name,
                         h("small", null, timeLabel(item.addedAt))))),
                 h("div", { className: "shopping-layout" },
-                    h("div", { className: "shopping-list" }, state.shopping.length ? state.shopping.map(item => h(ShoppingRow, { key: item.id, item: item, onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: amount => adjustShopping(item.id, amount), onStock: () => { stockShoppingItem(item); notify(`${item.name} stocked`); }, onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
+                    h("div", { className: "shopping-list" }, state.shopping.length ? state.shopping.map(item => h(ShoppingRow, { key: item.id, item: item, stockItem: findShoppingStock(item, state.stock), onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: direction => adjustShopping(item.id, direction), onUnitChange: unit => setState(current => ({ ...current, shopping: current.shopping.map(entry => entry.id === item.id ? { ...entry, unit } : entry) })), onStock: () => stockShoppingItem(item), onAdd: () => openAddFromShopping(item), onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
                     h("aside", { className: "smart-panel" },
                         h("span", { className: "eyebrow" },
                             h(Lightbulb, null),
@@ -572,7 +680,7 @@ function App() {
         showHelp && h(HelpModal, { onClose: () => setShowHelp(false), onEditPrompt: () => { setShowHelp(false); setShowPromptDefaults(true); } }),
         showInstallHelp && h(InstallHelpModal, { onClose: () => setShowInstallHelp(false), isiOS }),
         showPromptDefaults && h(PromptDefaultsModal, { value: state.promptTemplate || defaultPromptTemplate(), onClose: () => setShowPromptDefaults(false), onSave: template => { setState(current => ({ ...current, promptTemplate: normalisePromptTemplate(template), activity: [activity("prompt", "Default cooking prompt updated"), ...current.activity].slice(0, 100) })); setShowPromptDefaults(false); notify("Default prompt saved"); } }),
-        showAdd && h(Modal, { title: "Add to stock", onClose: () => setShowAdd(false) },
+        showAdd && h(Modal, { title: shoppingToAddId ? "Add shopping item to stock" : "Add to stock", onClose: () => { setShowAdd(false); setShoppingToAddId(null); } },
             h("form", { className: "form-grid", onSubmit: addStock },
                 h("label", { className: "full" },
                     "Ingredient",
@@ -683,21 +791,24 @@ function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit }) {
                 h("button", { onClick: onShop, title: "Add to shopping", "aria-label": `Add ${item.name} to shopping` }, h(ShoppingBasket, null)),
                 h("button", { className: "edit-stock-button", onClick: onEdit, title: "Edit ingredient", "aria-label": `Edit ${item.name}` }, h(Pencil, null)))));
 }
-function ShoppingRow({ item, onCheck, onAdjust, onStock, onDelete }) { return h("article", { className: `shopping-row ${item.checked ? "checked" : ""}` },
-    h("button", { className: "check-button", onClick: onCheck, "aria-label": item.checked ? `Uncheck ${item.name}` : `Check ${item.name}`, "aria-pressed": item.checked }, item.checked && h(Check, null)),
-    h("div", { className: "shopping-name" },
-        h("b", null, item.name),
-        h("small", null,
-            item.unit ? `${item.unit} · ` : "",
-            item.source,
-            " \u00B7 ",
-            timeLabel(item.addedAt))),
-    h(Stepper, { value: item.quantity, label: item.name, onMinus: () => onAdjust(-1), onPlus: () => onAdjust(1) }),
-    h("button", { className: "stock-button", onClick: onStock },
-        h(PackageCheck, null),
-        "Stock"),
-    h("button", { className: "icon-button delete", onClick: onDelete, "aria-label": `Delete ${item.name}` },
-        h(Trash2, null))); }
+function ShoppingRow({ item, stockItem, onCheck, onAdjust, onUnitChange, onStock, onAdd, onDelete }) {
+    const unit = String(item.unit || stockItem?.unit || "");
+    return h("article", { className: `shopping-row ${item.checked ? "checked" : ""} ${stockItem ? "linked-stock" : "new-product"}` },
+        h("button", { className: "check-button", onClick: onCheck, "aria-label": item.checked ? `Uncheck ${item.name}` : `Check ${item.name}`, "aria-pressed": item.checked }, item.checked && h(Check, null)),
+        h("div", { className: "shopping-name" },
+            h("b", null, item.name),
+            h("small", null,
+                h("span", { className: `stock-link-badge ${stockItem ? "linked" : "unlinked"}` }, stockItem ? "In stock" : "Not in stock"),
+                " · ", item.source, " · ", timeLabel(item.addedAt))),
+        h("div", { className: "shopping-quantity" },
+            h(Stepper, { value: item.quantity, label: `${item.name}${unit ? ` in ${unit}` : ""}`, onMinus: () => onAdjust(-1), onPlus: () => onAdjust(1) }),
+            h("input", { className: "shopping-unit-input", value: item.unit || "", onChange: event => onUnitChange(event.target.value), placeholder: stockItem?.unit || "each", "aria-label": `${item.name} shopping unit` })),
+        h("button", { className: `stock-button ${stockItem ? "restock" : "add-product"}`, onClick: stockItem ? onStock : onAdd, title: stockItem ? `Add purchased ${item.name} to existing stock` : `Create ${item.name} in stock` },
+            stockItem ? h(PackageCheck, null) : h(PackagePlus, null),
+            stockItem ? "Restock" : "Add"),
+        h("button", { className: "icon-button delete", onClick: onDelete, "aria-label": `Delete ${item.name}` },
+            h(Trash2, null)));
+}
 function RecipeCard({ recipe, state, onOpen }) {
     const availability = recipeAvailability(recipe, state.stock);
     const tags = (recipe.tags || []).slice(0, 4);
