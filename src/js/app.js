@@ -438,14 +438,16 @@ function App() {
     catch {
         notify("That backup is not valid");
     } };
-    const mergeIncomingTransfer = (payload) => {
-        const merged = mergeTransferredState(state, payload.state);
-        setState(merged.state);
-        setIncomingTransfer(null);
-        clearTransferHash();
-        const added = merged.summary.stockAdded + merged.summary.recipesAdded + merged.summary.categoriesAdded + merged.summary.shoppingAdded;
-        const updated = merged.summary.stockUpdated + merged.summary.recipesUpdated + merged.summary.categoriesUpdated + merged.summary.shoppingUpdated;
-        notify(`Data merged · ${added} new · ${updated} matched`);
+    const applyIncomingTransfer = (payload, options) => {
+        try {
+            const result = applyTransferredState(state, payload, options);
+            setState(result.state);
+            setIncomingTransfer(null);
+            clearTransferHash();
+            if (result.summary.mode === "replace") notify(`Replaced ${result.summary.replaced.length} selected section${result.summary.replaced.length === 1 ? "" : "s"}`);
+            else notify(`Data merged · ${result.summary.added} new · ${result.summary.updated} updated`);
+        }
+        catch { notify("Could not apply that transfer selection"); }
     };
     const dismissIncomingTransfer = () => { setIncomingTransfer(null); clearTransferHash(); };
     const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -747,7 +749,7 @@ function App() {
         selectedRecipe && h(RecipeDetail, { recipe: selectedRecipe, state, onClose: () => setSelectedRecipeId(null), onShop: name => addToShopping(name, "recipe"), onCook: () => cookRecipe(selectedRecipe), onDelete: () => deleteRecipe(selectedRecipe) }),
         showSettings && h(SettingsModal, { state: state, setState: setState, onClose: () => setShowSettings(false), exportData: exportData, importRef: importRef, restoreData: restoreData, notify: notify, onTransfer: () => { setShowSettings(false); setShowTransfer(true); }, onHelp: () => { setShowSettings(false); setShowHelp(true); }, onEditPromptDefaults: () => { setShowSettings(false); setShowPromptDefaults(true); } }),
         showTransfer && h(TransferModal, { state, onClose: () => setShowTransfer(false), notify, onReceive: payload => { setShowTransfer(false); setIncomingTransfer(payload); } }),
-        incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onMerge: () => mergeIncomingTransfer(incomingTransfer), onClose: dismissIncomingTransfer }),
+        incomingTransfer && h(TransferImportModal, { payload: incomingTransfer, onApply: options => applyIncomingTransfer(incomingTransfer, options), onClose: dismissIncomingTransfer }),
         toast && h("div", { className: "toast", role: "status", "aria-live": "polite" },
             h(Check, null),
             toast));
@@ -802,7 +804,7 @@ function ShoppingRow({ item, stockItem, onCheck, onAdjust, onUnitChange, onStock
                 " · ", item.source, " · ", timeLabel(item.addedAt))),
         h("div", { className: "shopping-quantity" },
             h(Stepper, { value: item.quantity, label: `${item.name}${unit ? ` in ${unit}` : ""}`, onMinus: () => onAdjust(-1), onPlus: () => onAdjust(1) }),
-            h("input", { className: "shopping-unit-input", value: item.unit || "", onChange: event => onUnitChange(event.target.value), placeholder: stockItem?.unit || "each", "aria-label": `${item.name} shopping unit` })),
+            h("input", { className: "shopping-unit-input", value: item.unit || "", onChange: event => onUnitChange(event.target.value), placeholder: stockItem?.unit || "unit", "aria-label": `${item.name} shopping unit` })),
         h("button", { className: `stock-button ${stockItem ? "restock" : "add-product"}`, onClick: stockItem ? onStock : onAdd, title: stockItem ? `Add purchased ${item.name} to existing stock` : `Create ${item.name} in stock` },
             stockItem ? h(PackageCheck, null) : h(PackagePlus, null),
             stockItem ? "Restock" : "Add"),
@@ -866,17 +868,46 @@ function RecipeDetail({ recipe, state, onClose, onShop, onCook, onDelete }) {
             h("div", { className: "recipe-history" }, recipe.lastCookedAt ? `Cooked ${recipe.timesCooked || 1}× · last ${timeLabel(recipe.lastCookedAt)}` : "Not cooked yet in Mise"),
             h("div", { className: "recipe-danger" }, h("button", { className: "danger-link", onClick: onDelete }, h(Trash2, null), "Delete recipe"))));
 }
+const transferSectionOptions = [
+    { id: "stock", label: "Stock", description: "Ingredients, quantities, units and statuses", Icon: Box },
+    { id: "categories", label: "Categories", description: "Names, colours and category icons", Icon: Tags },
+    { id: "recipes", label: "Recipes", description: "Saved recipes and their cook counts", Icon: BookOpen },
+    { id: "shopping", label: "Shopping", description: "Current shopping list and quantities", Icon: ShoppingBasket },
+    { id: "prompt", label: "Cooking prompt", description: "Your customised default AI prompt", Icon: Bot },
+    { id: "history", label: "History & insights", description: "Restock analytics and activity history", Icon: History }
+];
+function TransferSectionPicker({ selected, available = TRANSFER_SECTION_KEYS, onChange }) {
+    const allowed = new Set(available);
+    const toggle = id => {
+        if (!allowed.has(id)) return;
+        onChange(selected.includes(id) ? selected.filter(key => key !== id) : [...selected, id]);
+    };
+    return h("div", { className: "transfer-section-picker" }, transferSectionOptions.filter(option => allowed.has(option.id)).map(({ id, label, description, Icon }) => h("button", {
+        type: "button", key: id, className: selected.includes(id) ? "active" : "", onClick: () => toggle(id), "aria-pressed": selected.includes(id)
+    }, h("span", { className: "transfer-section-icon" }, h(Icon, null)), h("span", null, h("b", null, label), h("small", null, description)), h("span", { className: "transfer-section-check" }, selected.includes(id) ? h(Check, null) : null))));
+}
+function TransferModePicker({ value, onChange, compact = false }) {
+    return h("div", { className: `transfer-mode-picker ${compact ? "compact" : ""}`, role: "group", "aria-label": "Transfer import mode" },
+        h("button", { type: "button", className: value === "merge" ? "active" : "", onClick: () => onChange("merge") }, h(GitMerge, null), h("span", null, h("b", null, "Merge"), h("small", null, "Update matches, add new, keep receiver-only data"))),
+        h("button", { type: "button", className: value === "replace" ? "active replace" : "", onClick: () => onChange("replace") }, h(ArchiveRestore, null), h("span", null, h("b", null, "Replace selected"), h("small", null, "Make checked sections match the sender"))));
+}
 function TransferModal({ state, onClose, notify, onReceive }) {
+    const [sections, setSections] = useState([...TRANSFER_SECTION_KEYS]);
+    const [preferredMode, setPreferredMode] = useState("merge");
     const [bundle, setBundle] = useState(null);
     const [error, setError] = useState("");
     const [qrError, setQrError] = useState("");
     const qrRef = useRef(null);
     const fileRef = useRef(null);
+    const sectionKey = sections.join("|");
     useEffect(() => {
         let cancelled = false;
-        makeTransferBundle(state).then(value => { if (!cancelled) setBundle(value); }).catch(() => { if (!cancelled) setError("Could not prepare this transfer on this browser."); });
+        setBundle(null);
+        setError("");
+        if (!sections.length) { setError("Choose at least one type of data to send."); return () => { cancelled = true; }; }
+        makeTransferBundle(state, sections, preferredMode).then(value => { if (!cancelled) setBundle(value); }).catch(() => { if (!cancelled) setError("Could not prepare this transfer on this browser."); });
         return () => { cancelled = true; };
-    }, [state]);
+    }, [state, sectionKey, preferredMode]);
     useEffect(() => {
         if (!bundle?.linkSafe || !bundle.link || !qrRef.current) return;
         qrRef.current.replaceChildren();
@@ -895,7 +926,7 @@ function TransferModal({ state, onClose, notify, onReceive }) {
     const shareLink = async () => {
         if (!bundle?.linkSafe) return;
         if (navigator.share) {
-            try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this Mise kitchen data into another device.", url: bundle.link }); return; }
+            try { await navigator.share({ title: "Mise data transfer", text: "Open this in Mise to import the selected data.", url: bundle.link }); return; }
             catch (err) { if (err?.name === "AbortError") return; }
         }
         copyLink();
@@ -918,80 +949,82 @@ function TransferModal({ state, onClose, notify, onReceive }) {
         try {
             const file = new File([bundle.fileText], transferFileName(), { type: "application/json" });
             if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-                try { await navigator.share({ title: "Mise kitchen transfer", text: "Merge this snapshot into Mise on the other device.", files: [file] }); return; }
+                try { await navigator.share({ title: "Mise data transfer", text: "Import this selected Mise data on the other device.", files: [file] }); return; }
                 catch (err) { if (err?.name === "AbortError") return; }
             }
         }
         catch { }
         downloadFile();
     };
-    const receiveFile = async (event) => {
+    const receiveFile = async event => {
         const file = event.target.files?.[0];
         event.target.value = "";
         if (!file) return;
-        try {
-            const payload = await decodeTransferFile(file);
-            onReceive(payload);
-        }
+        try { onReceive(await decodeTransferFile(file)); }
         catch { notify("That Mise transfer file is not valid"); }
     };
     const fileSize = bundle?.fileBytes ? `${Math.max(1, Math.round(bundle.fileBytes / 1024))} KB` : "";
-    return h(Modal, { title: "Transfer between devices", onClose, wide: true },
+    return h(Modal, { title: "Transfer data", onClose, wide: true },
         h("div", { className: "transfer-layout" },
             h("section", { className: "transfer-explainer" },
-                h("span", { className: "eyebrow" }, h(Smartphone, null), " DEVICE TO DEVICE"),
-                h("h3", null, "Merge, don't replace"),
-                h("p", null, "The other device keeps anything that only exists there. Matching ingredient, recipe, shopping-item and category names are updated; new records are added."),
-                h("div", { className: "transfer-counts" },
-                    h("span", null, h(Box, null), h("b", null, state.stock.length), " ingredients"),
-                    h("span", null, h(BookOpen, null), h("b", null, state.recipes.length), " recipes"),
-                    h("span", null, h(Tags, null), h("b", null, state.categories.length), " categories"),
-                    h("span", null, h(ShoppingBasket, null), h("b", null, state.shopping.length), " shopping")),
-                h("div", { className: "transfer-privacy" }, h(ShieldCheck, null), h("p", null, "For small snapshots, QR/link data stays after the # in the URL and is not sent to GitHub Pages. Larger snapshots use a local transfer file that only leaves this device when you share it."))),
+                h("span", { className: "eyebrow" }, h(Smartphone, null), " CHOOSE WHAT TRAVELS"),
+                h("h3", null, "Send only what you want"),
+                h("p", null, "Choose the parts of Mise to include. The receiving device can narrow this selection again before importing."),
+                h("div", { className: "transfer-select-actions" },
+                    h("button", { type: "button", onClick: () => setSections([...TRANSFER_SECTION_KEYS]) }, "Select all"),
+                    h("button", { type: "button", onClick: () => setSections([]) }, "Clear")),
+                h(TransferSectionPicker, { selected: sections, onChange: setSections }),
+                h("div", { className: "transfer-mode-heading" }, h("b", null, "Suggested import behaviour"), h("small", null, "The receiver can still change this.")),
+                h(TransferModePicker, { value: preferredMode, onChange: setPreferredMode, compact: true }),
+                preferredMode === "replace" ? h("div", { className: "transfer-replace-warning" }, h(TriangleAlert, null), h("p", null, "Replace selected can remove receiver-only records inside the selected sections. Unselected sections are never touched.")) : null,
+                h("div", { className: "transfer-privacy" }, h(ShieldCheck, null), h("p", null, "Small snapshots can use QR/link. Larger ones automatically use a .mise file. Transfer data stays local until you share it."))),
             h("section", { className: "transfer-code-panel" },
                 !bundle && !error ? h("div", { className: "transfer-loading" }, h(QrCode, null), "Preparing transfer…") : null,
                 error ? h("div", { className: "transfer-error" }, h(TriangleAlert, null), error) : null,
                 bundle ? h(Fragment, null,
+                    h("div", { className: "transfer-export-summary" }, h("b", null, `${sections.length} section${sections.length === 1 ? "" : "s"} selected`), h("small", null, preferredMode === "merge" ? "Suggested: merge" : "Suggested: replace selected")),
                     bundle.linkSafe ? h(Fragment, null,
                         h("div", { className: `qr-shell ${qrError ? "qr-unavailable" : ""}` }, h("div", { ref: qrRef, className: "qr-code", "aria-label": "Mise transfer QR code" }), qrError ? h("p", null, qrError) : null),
                         h("label", { className: "transfer-link-field" }, h("span", null, "Transfer link"), h("textarea", { value: bundle.link, readOnly: true, rows: 3, onFocus: event => event.target.select() })),
                         h("div", { className: "transfer-actions" },
                             h("button", { className: "primary-button", onClick: copyLink }, h(Copy, null), "Copy link"),
                             h("button", { className: "soft-button", onClick: shareLink }, h(Share2, null), "Share link"))) :
-                        h("div", { className: "transfer-too-large" },
-                            h(TriangleAlert, null),
-                            h("div", null,
-                                h("b", null, "Too much data for a reliable QR/link"),
-                                h("p", null, `This snapshot is ${fileSize}. Embedding the whole kitchen in a URL would be easy for camera apps, messengers or browsers to truncate. Use the transfer file instead.`))),
+                        h("div", { className: "transfer-too-large" }, h(TriangleAlert, null), h("div", null, h("b", null, "Too much data for a reliable QR/link"), h("p", null, `This selected snapshot is ${fileSize}. Use the transfer file instead.`))),
                     h("div", { className: "transfer-file-actions" },
                         h("button", { className: bundle.linkSafe ? "soft-button" : "primary-button", onClick: shareFile }, h(Share2, null), "Share transfer file"),
-                        h("button", { className: "soft-button", onClick: downloadFile }, h(HardDriveDownload, null), "Download transfer file")),
-                    h("div", { className: "transfer-receive" },
-                        h("div", null, h("b", null, "Receiving on this device?"), h("p", null, "Choose a .mise transfer file. Mise will show the merge summary before changing anything.")),
-                        h("button", { className: "soft-button", onClick: () => fileRef.current?.click() }, h(Upload, null), "Import transfer file"),
-                        h("input", { ref: fileRef, hidden: true, type: "file", accept: ".mise,application/json,.json", onChange: receiveFile }))) : null)));
+                        h("button", { className: "soft-button", onClick: downloadFile }, h(HardDriveDownload, null), "Download transfer file"))) : null,
+                h("div", { className: "transfer-receive" },
+                    h("div", null, h("b", null, "Importing on this device?"), h("p", null, "Choose a .mise file. You will pick Merge/Replace and the exact sections before anything changes.")),
+                    h("button", { className: "soft-button", onClick: () => fileRef.current?.click() }, h(Upload, null), "Import transfer file"),
+                    h("input", { ref: fileRef, hidden: true, type: "file", accept: ".mise,application/json,.json", onChange: receiveFile })))));
 }
 
-function TransferImportModal({ payload, onMerge, onClose }) {
+function TransferImportModal({ payload, onApply, onClose }) {
+    const available = normaliseTransferSections(payload.sections, []);
+    const [selected, setSelected] = useState([...available]);
+    const [mode, setMode] = useState(payload.preferredMode === "replace" ? "replace" : "merge");
     const incoming = payload.state;
     const created = payload.createdAt ? new Date(payload.createdAt).toLocaleString() : "another device";
-    return h(Modal, { title: "Merge Mise data?", onClose, wide: true },
-        h("div", { className: "transfer-import" },
-            h("div", { className: "transfer-import-icon" }, h(GitMerge, null)),
+    const countFor = id => id === "stock" ? incoming.stock?.length || 0 : id === "categories" ? incoming.categories?.length || 0 : id === "recipes" ? incoming.recipes?.length || 0 : id === "shopping" ? incoming.shopping?.length || 0 : id === "prompt" ? (incoming.promptTemplate ? 1 : 0) : id === "history" ? ((incoming.activity?.length || 0) + Object.keys(incoming.analytics || {}).length) : 0;
+    return h(Modal, { title: "Import Mise data", onClose, wide: true },
+        h("div", { className: "transfer-import fine-tune" },
+            h("div", { className: "transfer-import-icon" }, mode === "merge" ? h(GitMerge, null) : h(ArchiveRestore, null)),
             h("div", null,
                 h("span", { className: "eyebrow" }, "INCOMING SNAPSHOT"),
-                h("h3", null, "Add and update — never delete"),
-                h("p", null, `Created ${created}. Matching names from this transfer will update the copy on this device. Anything that exists only on this device stays exactly where it is.`)),
-            h("div", { className: "transfer-counts incoming" },
-                h("span", null, h(Box, null), h("b", null, incoming.stock?.length || 0), " ingredients"),
-                h("span", null, h(BookOpen, null), h("b", null, incoming.recipes?.length || 0), " recipes"),
-                h("span", null, h(Tags, null), h("b", null, incoming.categories?.length || 0), " categories"),
-                h("span", null, h(ShoppingBasket, null), h("b", null, incoming.shopping?.length || 0), " shopping")),
-            h("div", { className: "transfer-merge-note" }, h(ShieldCheck, null), h("p", null, "Stock quantities, units, statuses, increments, recipe details and matching category settings from the sending device take precedence for matching names.")),
+                h("h3", null, mode === "merge" ? "Merge selected data" : "Replace selected data"),
+                h("p", null, `Created ${created}. Choose exactly what this device should accept.`)),
+            h("div", { className: "transfer-import-controls" },
+                h("div", { className: "transfer-mode-heading" }, h("b", null, "How should it import?")),
+                h(TransferModePicker, { value: mode, onChange: setMode }),
+                mode === "replace" ? h("div", { className: "transfer-replace-warning" }, h(TriangleAlert, null), h("p", null, "Replace selected deletes receiver-only records inside the checked sections so those sections match the sender. Everything unchecked stays untouched.")) : h("div", { className: "transfer-merge-note" }, h(ShieldCheck, null), h("p", null, "Merge updates matching names, adds new records, and keeps receiver-only records.")),
+                h("div", { className: "transfer-mode-heading" }, h("b", null, "What should be imported?"), h("small", null, `${selected.length} of ${available.length} selected`)),
+                h(TransferSectionPicker, { selected, available, onChange: setSelected }),
+                h("div", { className: "transfer-import-counts" }, transferSectionOptions.filter(option => available.includes(option.id)).map(({ id, label, Icon }) => h("span", { key: id, className: selected.includes(id) ? "active" : "" }, h(Icon, null), h("b", null, countFor(id)), h("small", null, label))))),
             h("div", { className: "modal-actions" },
                 h("button", { className: "soft-button", onClick: onClose }, "Cancel"),
-                h("button", { className: "primary-button", onClick: onMerge }, h(GitMerge, null), "Merge into this device"))));
+                h("button", { className: "primary-button", disabled: !selected.length, onClick: () => onApply({ mode, sections: selected }) }, mode === "merge" ? h(GitMerge, null) : h(ArchiveRestore, null), mode === "merge" ? "Merge selected" : "Replace selected"))));
 }
+
 function InstallHelpModal({ onClose, isiOS }) {
     return h(Modal, { title: "Install Mise", onClose },
         h("div", { className: "install-help" },
@@ -1104,7 +1137,7 @@ function SettingsModal({ state, setState, onClose, exportData, importRef, restor
                     h(ShieldCheck, null),
                     " YOUR DATA"),
                 h("h3", null, "Private by design"),
-                h("p", null, "Everything lives in this browser. Transfer data to another device by QR when it is small, or by a merge-safe Mise transfer file when it is larger."),
+                h("p", null, "Everything lives in this browser. Transfer all or selected data by QR/link when small, or by a .mise file when larger. The receiver can merge or replace only the sections it chooses."),
                 h("div", { className: "data-actions" },
                     h("button", { className: "soft-button transfer-button", onClick: onTransfer },
                         h(QrCode, null),

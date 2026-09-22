@@ -738,15 +738,74 @@ function transferBaseUrl() {
     catch { }
     return TRANSFER_FALLBACK_URL;
 }
-function makeTransferPayload(state) {
-    return { kind: "mise-transfer", version: 1, createdAt: Date.now(), state: migrateLegacyStatuses(state) };
+const TRANSFER_SECTION_KEYS = ["stock", "categories", "recipes", "shopping", "prompt", "history"];
+function normaliseTransferSections(sections, fallback = TRANSFER_SECTION_KEYS) {
+    const source = Array.isArray(sections) ? sections : fallback;
+    return TRANSFER_SECTION_KEYS.filter(key => source.includes(key));
+}
+function makeTransferPayload(state, sections = TRANSFER_SECTION_KEYS, preferredMode = "merge") {
+    const source = migrateLegacyStatuses(state);
+    const selected = normaliseTransferSections(sections);
+    const transferState = { version: 1 };
+    if (selected.includes("stock")) transferState.stock = source.stock || [];
+    if (selected.includes("categories")) transferState.categories = source.categories || [];
+    if (selected.includes("recipes")) transferState.recipes = source.recipes || [];
+    if (selected.includes("shopping")) transferState.shopping = source.shopping || [];
+    if (selected.includes("prompt")) transferState.promptTemplate = normalisePromptTemplate(source.promptTemplate);
+    if (selected.includes("history")) {
+        transferState.analytics = source.analytics || {};
+        transferState.activity = source.activity || [];
+    }
+    /* Category references are tiny support metadata. They let a stock-only
+       transfer map category IDs by name without actually importing categories. */
+    const support = selected.includes("stock") ? {
+        categories: (source.categories || []).map(category => ({ id: category.id, name: category.name }))
+    } : undefined;
+    return {
+        kind: "mise-transfer",
+        version: 2,
+        createdAt: Date.now(),
+        sections: selected,
+        preferredMode: preferredMode === "replace" ? "replace" : "merge",
+        state: transferState,
+        ...(support ? { support } : {})
+    };
+}
+function normalisePartialTransferState(raw = {}) {
+    const shell = {
+        version: 1,
+        categories: Array.isArray(raw.categories) ? raw.categories : [],
+        stock: Array.isArray(raw.stock) ? raw.stock : [],
+        shopping: Array.isArray(raw.shopping) ? raw.shopping : [],
+        recipes: Array.isArray(raw.recipes) ? raw.recipes : [],
+        analytics: raw.analytics && typeof raw.analytics === "object" ? raw.analytics : {},
+        activity: Array.isArray(raw.activity) ? raw.activity : [],
+        promptTemplate: typeof raw.promptTemplate === "string" ? raw.promptTemplate : defaultPromptTemplate()
+    };
+    return migrateLegacyStatuses(shell);
 }
 function validateTransferPayload(payload) {
-    if (payload?.kind !== "mise-transfer" || payload.version !== 1 || !payload.state || !Array.isArray(payload.state.stock) || !Array.isArray(payload.state.categories)) throw new Error("Invalid Mise transfer data");
-    return { ...payload, state: migrateLegacyStatuses(payload.state) };
+    if (payload?.kind !== "mise-transfer" || !payload.state) throw new Error("Invalid Mise transfer data");
+    if (payload.version === 1) {
+        if (!Array.isArray(payload.state.stock) || !Array.isArray(payload.state.categories)) throw new Error("Invalid Mise transfer data");
+        return {
+            ...payload,
+            version: 2,
+            sections: [...TRANSFER_SECTION_KEYS],
+            preferredMode: "merge",
+            state: migrateLegacyStatuses(payload.state),
+            support: { categories: payload.state.categories || [] }
+        };
+    }
+    if (payload.version !== 2) throw new Error("Unsupported Mise transfer version");
+    const sections = normaliseTransferSections(payload.sections, []);
+    if (!sections.length) throw new Error("Mise transfer has no data sections");
+    const state = normalisePartialTransferState(payload.state);
+    const supportCategories = Array.isArray(payload.support?.categories) ? payload.support.categories.map(category => ({ id: category.id, name: String(category.name || "") })).filter(category => category.name) : [];
+    return { ...payload, sections, preferredMode: payload.preferredMode === "replace" ? "replace" : "merge", state, support: { ...(payload.support || {}), categories: supportCategories } };
 }
-async function makeTransferBundle(state) {
-    const payload = makeTransferPayload(state);
+async function makeTransferBundle(state, sections = TRANSFER_SECTION_KEYS, preferredMode = "merge") {
+    const payload = makeTransferPayload(state, sections, preferredMode);
     const fileText = JSON.stringify(payload);
     const encoded = await compressTransferText(fileText);
     const link = `${transferBaseUrl()}#${TRANSFER_PARAM}=${encoded}`;
@@ -759,7 +818,7 @@ async function makeTransferBundle(state) {
         fileBytes: new TextEncoder().encode(fileText).length
     };
 }
-async function makeTransferLink(state) { return (await makeTransferBundle(state)).link; }
+async function makeTransferLink(state, sections, preferredMode) { return (await makeTransferBundle(state, sections, preferredMode)).link; }
 function transferFileName(date = new Date()) { return `mise-transfer-${date.toISOString().slice(0, 10)}.mise`; }
 async function decodeTransferFile(file) {
     if (!file || typeof file.text !== "function") throw new Error("Invalid Mise transfer file");
@@ -791,6 +850,11 @@ function mergeAnalytics(current = {}, incoming = {}) {
     }
     return result;
 }
+function mergeActivity(current = [], incoming = []) {
+    const activityKey = entry => `${entry?.type || ""}|${entry?.label || ""}|${Number(entry?.at || 0)}`;
+    const seen = new Set();
+    return [...(incoming || []), ...(current || [])].filter(entry => { const key = activityKey(entry); if (seen.has(key)) return false; seen.add(key); return true; }).sort((a, b) => Number(b.at || 0) - Number(a.at || 0)).slice(0, 100);
+}
 function mergeNamedRecords(current, incoming, nameOf, prepareIncoming = value => value) {
     const records = [...(current || [])];
     let added = 0, updated = 0;
@@ -804,64 +868,123 @@ function mergeNamedRecords(current, incoming, nameOf, prepareIncoming = value =>
     }
     return { records, added, updated };
 }
-function mergeTransferredState(currentState, incomingState) {
+function categoryNameMap(categories = []) {
+    return new Map((categories || []).map(category => [category.id, String(category.name || "")]));
+}
+function categoryIdByName(categories = []) {
+    return new Map((categories || []).map(category => [normalise(category.name), category.id]));
+}
+function mapStockCategory(item, sourceCategoryNames, targetCategories, fallbackCategoryId = null) {
+    if (!item?.categoryId) return { ...item, categoryId: fallbackCategoryId || null };
+    const sourceName = sourceCategoryNames.get(item.categoryId);
+    const targetId = sourceName ? categoryIdByName(targetCategories).get(normalise(sourceName)) : null;
+    return { ...item, categoryId: targetId || fallbackCategoryId || null };
+}
+function replaceCategoriesAndRemapStock(currentCategories, nextCategories, stock) {
+    const oldNames = categoryNameMap(currentCategories);
+    const newIds = categoryIdByName(nextCategories);
+    return (stock || []).map(item => {
+        const oldName = item.categoryId ? oldNames.get(item.categoryId) : "";
+        return { ...item, categoryId: oldName ? (newIds.get(normalise(oldName)) || null) : null };
+    });
+}
+function applyTransferredState(currentState, rawPayload, options = {}) {
+    const payload = validateTransferPayload(rawPayload);
     const current = migrateLegacyStatuses(currentState);
-    const incoming = migrateLegacyStatuses(incomingState);
+    const available = normaliseTransferSections(payload.sections, []);
+    const requested = normaliseTransferSections(options.sections, available).filter(key => available.includes(key));
+    if (!requested.length) throw new Error("Choose at least one transfer section");
+    const selected = new Set(requested);
+    const mode = options.mode === "replace" ? "replace" : "merge";
+    const incoming = payload.state;
+    let next = { ...current };
+    const summary = { mode, sections: requested, added: 0, updated: 0, replaced: [] };
 
-    const categories = [...(current.categories || [])];
-    const categoryMap = new Map();
-    let categoriesAdded = 0, categoriesUpdated = 0;
-    for (const category of incoming.categories || []) {
-        const key = normalise(category.name);
-        if (!key) continue;
-        const index = categories.findIndex(existing => normalise(existing.name) === key);
-        if (index >= 0) {
-            const targetId = categories[index].id;
-            categories[index] = { ...categories[index], ...category, id: targetId };
-            categoryMap.set(category.id, targetId); categoriesUpdated++;
+    const sourceCategoryRecords = (incoming.categories?.length ? incoming.categories : payload.support?.categories) || [];
+    const sourceCategoryNames = categoryNameMap(sourceCategoryRecords);
+
+    if (selected.has("categories")) {
+        if (mode === "replace") {
+            const categories = (incoming.categories || []).map(category => ({ ...category }));
+            next.stock = replaceCategoriesAndRemapStock(current.categories, categories, next.stock);
+            next.categories = categories;
+            summary.replaced.push("categories");
         } else {
-            let id = category.id || uuid();
-            if (categories.some(existing => existing.id === id)) id = uuid();
-            categories.push({ ...category, id });
-            categoryMap.set(category.id, id); categoriesAdded++;
+            const merged = mergeNamedRecords(next.categories, incoming.categories, category => category.name);
+            next.categories = merged.records;
+            summary.added += merged.added; summary.updated += merged.updated;
         }
     }
 
-    const stockMerge = mergeNamedRecords(current.stock, incoming.stock, item => item.name, item => ({
-        ...item,
-        categoryId: item.categoryId ? (categoryMap.get(item.categoryId) || (categories.some(category => category.id === item.categoryId) ? item.categoryId : null)) : null,
-        statuses: itemStatuses(item),
-        increment: itemIncrement(item)
-    }));
-    const recipeMerge = mergeNamedRecords(current.recipes, incoming.recipes, recipe => recipe.title, recipe => ({
-        ...recipe, ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : []
-    }));
-    const shoppingMerge = mergeNamedRecords(current.shopping, incoming.shopping, item => item.name, item => linkShoppingItem({ ...item, quantity: Number(item.quantity || 1), checked: Boolean(item.checked) }, stockMerge.records));
-
-    const activityKey = entry => `${entry?.type || ""}|${entry?.label || ""}|${Number(entry?.at || 0)}`;
-    const seenActivity = new Set();
-    const activity = [...(incoming.activity || []), ...(current.activity || [])].filter(entry => { const key = activityKey(entry); if (seenActivity.has(key)) return false; seenActivity.add(key); return true; }).sort((a, b) => Number(b.at || 0) - Number(a.at || 0)).slice(0, 100);
-
-    return {
-        state: {
-            ...current,
-            version: 1,
-            categories,
-            stock: stockMerge.records,
-            recipes: recipeMerge.records,
-            shopping: shoppingMerge.records,
-            analytics: mergeAnalytics(current.analytics, incoming.analytics),
-            promptTemplate: normalisePromptTemplate(incoming.promptTemplate || current.promptTemplate),
-            activity
-        },
-        summary: {
-            categoriesAdded, categoriesUpdated,
-            stockAdded: stockMerge.added, stockUpdated: stockMerge.updated,
-            recipesAdded: recipeMerge.added, recipesUpdated: recipeMerge.updated,
-            shoppingAdded: shoppingMerge.added, shoppingUpdated: shoppingMerge.updated
+    if (selected.has("stock")) {
+        const prepareStock = raw => {
+            const existing = next.stock.find(item => normalise(item.name) === normalise(raw.name));
+            const mapped = mapStockCategory(raw, sourceCategoryNames, next.categories, existing?.categoryId || null);
+            return { ...mapped, statuses: itemStatuses(raw), increment: itemIncrement(raw) };
+        };
+        if (mode === "replace") {
+            next.stock = (incoming.stock || []).map(prepareStock);
+            summary.replaced.push("stock");
+        } else {
+            const merged = mergeNamedRecords(next.stock, incoming.stock, item => item.name, prepareStock);
+            next.stock = merged.records;
+            summary.added += merged.added; summary.updated += merged.updated;
         }
-    };
+    }
+
+    if (selected.has("recipes")) {
+        const prepRecipe = recipe => ({ ...recipe, ingredients: recipeIngredientObjects(recipe), steps: Array.isArray(recipe.steps) ? recipe.steps.map(String) : [], tags: Array.isArray(recipe.tags) ? recipe.tags.map(String) : [] });
+        if (mode === "replace") {
+            next.recipes = (incoming.recipes || []).map(recipe => ({ ...prepRecipe(recipe), id: recipe.id || uuid() }));
+            summary.replaced.push("recipes");
+        } else {
+            const merged = mergeNamedRecords(next.recipes, incoming.recipes, recipe => recipe.title, prepRecipe);
+            next.recipes = merged.records;
+            summary.added += merged.added; summary.updated += merged.updated;
+        }
+    }
+
+    if (selected.has("shopping")) {
+        const prepShopping = item => linkShoppingItem({ ...item, quantity: Number(item.quantity || 1), checked: Boolean(item.checked) }, next.stock);
+        if (mode === "replace") {
+            next.shopping = (incoming.shopping || []).map(item => ({ ...prepShopping(item), id: item.id || uuid() }));
+            summary.replaced.push("shopping");
+        } else {
+            const merged = mergeNamedRecords(next.shopping, incoming.shopping, item => item.name, prepShopping);
+            next.shopping = merged.records;
+            summary.added += merged.added; summary.updated += merged.updated;
+        }
+    } else if (selected.has("stock")) {
+        /* Keep receiver shopping links valid after stock IDs change/relink. */
+        next.shopping = (next.shopping || []).map(item => linkShoppingItem(item, next.stock));
+    }
+
+    if (selected.has("prompt")) {
+        next.promptTemplate = normalisePromptTemplate(incoming.promptTemplate);
+        if (mode === "replace") summary.replaced.push("prompt"); else summary.updated += 1;
+    }
+
+    if (selected.has("history")) {
+        if (mode === "replace") {
+            next.analytics = incoming.analytics || {};
+            next.activity = incoming.activity || [];
+            summary.replaced.push("history");
+        } else {
+            next.analytics = mergeAnalytics(next.analytics, incoming.analytics);
+            next.activity = mergeActivity(next.activity, incoming.activity);
+            summary.updated += Object.keys(incoming.analytics || {}).length;
+        }
+    }
+
+    next.version = 1;
+    return { state: migrateLegacyStatuses(next), summary };
 }
+/* Backwards-compatible helper for older call sites: full merge. */
+function mergeTransferredState(currentState, incomingState) {
+    const payload = { kind: "mise-transfer", version: 2, sections: [...TRANSFER_SECTION_KEYS], preferredMode: "merge", state: incomingState, support: { categories: incomingState?.categories || [] } };
+    return applyTransferredState(currentState, payload, { mode: "merge", sections: TRANSFER_SECTION_KEYS });
+}
+
 
 function loadState() {
     try {
