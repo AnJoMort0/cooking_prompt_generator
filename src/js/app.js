@@ -70,6 +70,8 @@ function App() {
     const [showTransfer, setShowTransfer] = useState(false);
     const [incomingTransfer, setIncomingTransfer] = useState(null);
     const [showImport, setShowImport] = useState(false);
+    const [showShoppingSearch, setShowShoppingSearch] = useState(false);
+    const [shoppingQuery, setShoppingQuery] = useState("");
     const [shoppingText, setShoppingText] = useState("");
     const [shoppingImport, setShoppingImport] = useState("");
     const [recipeDraft, setRecipeDraft] = useState("");
@@ -320,6 +322,14 @@ function App() {
     };
     const smart = useMemo(() => smartRecommendations(state), [state]);
     const recent = useMemo(() => recentShopping(state), [state]);
+    const visibleShopping = useMemo(() => {
+        const queryText = normalise(shoppingQuery);
+        if (!queryText) return state.shopping;
+        return state.shopping.filter(item => {
+            const stockItem = findShoppingStock(item, state.stock);
+            return normalise(`${item.name} ${item.unit || ""} ${item.source || ""} ${stockItem?.name || ""}`).includes(queryText);
+        });
+    }, [state.shopping, state.stock, shoppingQuery]);
     const recipeStars = useMemo(() => topRecipeItems(state), [state]);
     const frequent = useMemo(() => frequentBuys(state), [state]);
     const useFirst = useMemo(() => state.stock.filter(item => item.quantity > 0 && (hasStatus(item, "expiring") || hasStatus(item, "open") || hasStatus(item, "leftover"))).sort((a, b) => {
@@ -609,13 +619,19 @@ function App() {
                             " RESTOCK"),
                         h("h1", null, "Shopping"),
                         h("p", null, state.shopping.length ? `${state.shopping.length} things waiting · ${state.shopping.filter(i => i.checked).length} checked off` : "A list that learns from your local habits.")),
-                    h("div", { className: "title-actions" },
+                    h("div", { className: "title-actions shopping-title-actions" },
+                        h("button", { className: `icon-button shopping-search-toggle ${showShoppingSearch || shoppingQuery ? "active" : ""}`, onClick: () => { setShowShoppingSearch(current => !current); if (showShoppingSearch) setShoppingQuery(""); }, title: "Search shopping list", "aria-label": "Search shopping list", "aria-expanded": showShoppingSearch },
+                            h(Search, null)),
                         h("button", { className: "soft-button", onClick: () => setShowImport(!showImport) },
                             h(ClipboardPaste, null),
                             "Paste AI list"),
                         state.shopping.some(i => i.checked) && h("button", { className: "primary-button", onClick: stockChecked },
                             h(PackageCheck, null),
                             "Restock bought"))),
+                showShoppingSearch && h("label", { className: "shopping-search", "aria-label": "Search shopping list" },
+                    h(Search, null),
+                    h("input", { autoFocus: true, value: shoppingQuery, onChange: e => setShoppingQuery(e.target.value), placeholder: "Search what is already on the list" }),
+                    shoppingQuery && h("button", { type: "button", onClick: () => setShoppingQuery(""), "aria-label": "Clear shopping search" }, h(X, null))),
                 showImport && h("div", { className: "import-panel" },
                     h("div", null,
                         h("b", null, "Paste the AI reply or shopping block"),
@@ -641,7 +657,7 @@ function App() {
                         item.name,
                         h("small", null, timeLabel(item.addedAt))))),
                 h("div", { className: "shopping-layout" },
-                    h("div", { className: "shopping-list" }, state.shopping.length ? state.shopping.map(item => h(ShoppingRow, { key: item.id, item: item, stockItem: findShoppingStock(item, state.stock), onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: direction => adjustShopping(item.id, direction), onUnitChange: unit => setState(current => ({ ...current, shopping: current.shopping.map(entry => entry.id === item.id ? { ...entry, unit } : entry) })), onStock: () => stockShoppingItem(item), onAdd: () => openAddFromShopping(item), onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
+                    h("div", { className: "shopping-list" }, state.shopping.length ? (visibleShopping.length ? visibleShopping.map(item => h(ShoppingRow, { key: item.id, item: item, stockItem: findShoppingStock(item, state.stock), onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: direction => adjustShopping(item.id, direction), onUnitChange: unit => setState(current => ({ ...current, shopping: current.shopping.map(entry => entry.id === item.id ? { ...entry, unit } : entry) })), onStock: () => stockShoppingItem(item), onAdd: () => openAddFromShopping(item), onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })) : h(Empty, { icon: h(Search, null), title: "Not on the list", text: `No shopping item matches “${shoppingQuery}”.` })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
                     h("aside", { className: "smart-panel" },
                         h("span", { className: "eyebrow" },
                             h(Lightbulb, null),
@@ -826,6 +842,7 @@ function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit }) {
     const category = state.categories.find(c => c.id === item.categoryId);
     const recipes = usageCount(item.name, state.recipes);
     const shoppingAdds = analyticsFor(state, item.name).shoppingAdds;
+    const inShopping = state.shopping.some(shoppingItem => shoppingItem.stockId === item.id || matchesName(shoppingItem.name, item.name));
     return h("article", { className: `stock-card ${item.quantity === 0 ? "out" : ""}`, style: { "--category": category?.color || "#92958d" } },
         h("div", { className: "stock-card-top" },
             h("span", { className: "category-mark", style: { "--category": category?.color || "#92958d" } },
@@ -844,7 +861,7 @@ function StockCard({ item, state, onAdjust, onStatus, onShop, onEdit }) {
             h(Stepper, { value: item.quantity, label: `${item.name}; changes by ${formatQuantity(itemIncrement(item))} ${item.unit || "units"}`, onMinus: () => onAdjust(item.id, -1), onPlus: () => onAdjust(item.id, 1) }),
             h("small", null, item.unit),
             h("div", { className: "card-actions" },
-                h("button", { onClick: onShop, title: "Add to shopping", "aria-label": `Add ${item.name} to shopping` }, h(ShoppingBasket, null)),
+                h("button", { className: `shopping-card-button ${inShopping ? "active" : ""}`, onClick: onShop, title: inShopping ? "Already on shopping list — add another" : "Add to shopping", "aria-label": inShopping ? `${item.name} is on the shopping list; add another` : `Add ${item.name} to shopping`, "aria-pressed": inShopping }, h(ShoppingBasket, null)),
                 h("button", { className: "edit-stock-button", onClick: onEdit, title: "Edit ingredient", "aria-label": `Edit ${item.name}` }, h(Pencil, null)))));
 }
 function ShoppingRow({ item, stockItem, onCheck, onAdjust, onUnitChange, onStock, onAdd, onDelete }) {

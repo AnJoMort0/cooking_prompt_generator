@@ -1,4 +1,4 @@
-const VERSION = "mise-pwa-v26";
+const VERSION = "mise-pwa-v27";
 const SHELL_CACHE = `${VERSION}-shell`;
 const RUNTIME_CACHE = `${VERSION}-runtime`;
 const LUCIDE_URL = "https://unpkg.com/lucide@1.47.0";

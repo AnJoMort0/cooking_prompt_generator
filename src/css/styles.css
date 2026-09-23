@@ -1624,3 +1624,21 @@ button svg.lucide{pointer-events:none}
   .modal:has(.recipe-editor){width:100%;height:100dvh;max-height:100dvh;border-radius:0;padding:16px 14px 92px}
   .modal:has(.recipe-editor)>header{position:sticky;z-index:5;top:-16px;margin:-16px -14px 14px;background:#fff;padding:16px 14px 12px;border-bottom:1px solid var(--line)}
 }
+
+
+/* v27 — searchable shopping list + persistent stock/cart state */
+.shopping-search-toggle.active{background:var(--ink);color:#fff}
+.shopping-search{display:flex;align-items:center;gap:9px;width:min(720px,100%);height:48px;margin:-6px 0 16px;border:1px solid var(--line);border-radius:15px;background:#fff;padding:0 10px 0 14px;color:#7d8178;box-shadow:0 4px 16px rgb(31 33 29/5%)}
+.shopping-search>.ui-icon{--icon-size:18px;flex:0 0 auto}
+.shopping-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:var(--ink);font-size:.95rem}
+.shopping-search button{display:grid;width:30px;height:30px;place-items:center;border-radius:999px;background:#f0eee8;color:#70746b}
+.shopping-search button .ui-icon{--icon-size:14px}
+.card-actions .shopping-card-button.active{background:var(--paprika);color:#fff;box-shadow:inset 0 0 0 1px rgb(126 39 19/10%)}
+.card-actions .shopping-card-button.active:hover{background:#cf4c2b}
+@media(max-width:620px){
+  .shopping-title-actions{display:grid;width:100%;grid-template-columns:44px minmax(0,1fr);gap:8px}
+  .shopping-title-actions .shopping-search-toggle{width:44px;height:42px}
+  .shopping-title-actions .soft-button{min-width:0}
+  .shopping-title-actions .primary-button{grid-column:1/-1;width:100%}
+  .shopping-search{width:100%;height:44px;margin:-4px 0 14px}
+}
