@@ -46,6 +46,36 @@ function CategoryGlyph({ category, size = 16 }) {
     return h("span", { className: "category-glyph", style: { "--category": category?.color || "#92958d" } }, h(Icon, { size }));
 }
 
+/* Shopping follows a broad discount-supermarket aisle flow. Real store layouts
+   vary, so custom categories are matched semantically and unknown ones simply
+   stay together at the end instead of being forced into the wrong aisle. */
+const shoppingAisleRules = [
+    { rank: 10, test: /produce|fruit|vegetable|\bveg\b|fresh/ },
+    { rank: 20, test: /bakery|bread|grain|cereal/ },
+    { rank: 30, test: /protein|meat|fish|seafood|deli/ },
+    { rank: 40, test: /dairy|chilled|fridge|cheese|milk/ },
+    { rank: 50, test: /frozen|freezer/ },
+    { rank: 60, test: /pantry|cupboard|dry|tinned|canned|pasta|rice|noodle/ },
+    { rank: 70, test: /sauce|condiment|oil|vinegar|spread/ },
+    { rank: 80, test: /spice|herb|season|baking|flour/ },
+    { rank: 90, test: /sweet|snack|dessert|candy|chocolate|biscuit|cookie|cake/ },
+    { rank: 100, test: /drink|beverage|water|juice|beer|wine|coffee|tea/ },
+    { rank: 110, test: /house|clean|laundry|toilet|paper|pet|misc/ }
+];
+function shoppingCategoryFor(item, state) {
+    const stockItem = findShoppingStock(item, state.stock);
+    const categoryId = stockItem?.categoryId || inferCategory(item.name, state.categories, state.stock);
+    return state.categories.find(category => category.id === categoryId) || null;
+}
+function shoppingAisleRank(category, categories) {
+    if (!category) return 1000;
+    const key = normalise(`${category.id || ""} ${category.name || ""}`);
+    const matched = shoppingAisleRules.find(rule => rule.test.test(key));
+    if (matched) return matched.rank;
+    const customIndex = Math.max(0, categories.findIndex(entry => entry.id === category.id));
+    return 500 + customIndex;
+}
+
 function Stepper({ value, onMinus, onPlus, label }) { return h("div", { className: "stepper", "aria-label": label },
     h("button", { onClick: onMinus, "aria-label": `Decrease ${label}` },
         h(Minus, null)),
@@ -324,12 +354,37 @@ function App() {
     const recent = useMemo(() => recentShopping(state), [state]);
     const visibleShopping = useMemo(() => {
         const queryText = normalise(shoppingQuery);
-        if (!queryText) return state.shopping;
-        return state.shopping.filter(item => {
+        const filtered = queryText ? state.shopping.filter(item => {
             const stockItem = findShoppingStock(item, state.stock);
-            return normalise(`${item.name} ${item.unit || ""} ${item.source || ""} ${stockItem?.name || ""}`).includes(queryText);
+            const category = shoppingCategoryFor(item, state);
+            return normalise(`${item.name} ${item.unit || ""} ${item.source || ""} ${stockItem?.name || ""} ${category?.name || ""}`).includes(queryText);
+        }) : [...state.shopping];
+        return filtered.sort((a, b) => {
+            const categoryA = shoppingCategoryFor(a, state);
+            const categoryB = shoppingCategoryFor(b, state);
+            const rank = shoppingAisleRank(categoryA, state.categories) - shoppingAisleRank(categoryB, state.categories);
+            if (rank) return rank;
+            const categoryName = String(categoryA?.name || "Other").localeCompare(String(categoryB?.name || "Other"));
+            if (categoryName) return categoryName;
+            const checked = Number(Boolean(a.checked)) - Number(Boolean(b.checked));
+            if (checked) return checked;
+            return String(a.name || "").localeCompare(String(b.name || ""));
         });
-    }, [state.shopping, state.stock, shoppingQuery]);
+    }, [state.shopping, state.stock, state.categories, shoppingQuery]);
+    const shoppingGroups = useMemo(() => {
+        const groups = [];
+        for (const item of visibleShopping) {
+            const category = shoppingCategoryFor(item, state);
+            const key = category?.id || "other";
+            let group = groups.find(entry => entry.key === key);
+            if (!group) {
+                group = { key, category, label: category?.name || "Other", items: [] };
+                groups.push(group);
+            }
+            group.items.push(item);
+        }
+        return groups;
+    }, [visibleShopping, state.stock, state.categories]);
     const recipeStars = useMemo(() => topRecipeItems(state), [state]);
     const frequent = useMemo(() => frequentBuys(state), [state]);
     const useFirst = useMemo(() => state.stock.filter(item => item.quantity > 0 && (hasStatus(item, "expiring") || hasStatus(item, "open") || hasStatus(item, "leftover"))).sort((a, b) => {
@@ -657,7 +712,12 @@ function App() {
                         item.name,
                         h("small", null, timeLabel(item.addedAt))))),
                 h("div", { className: "shopping-layout" },
-                    h("div", { className: "shopping-list" }, state.shopping.length ? (visibleShopping.length ? visibleShopping.map(item => h(ShoppingRow, { key: item.id, item: item, stockItem: findShoppingStock(item, state.stock), onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: direction => adjustShopping(item.id, direction), onUnitChange: unit => setState(current => ({ ...current, shopping: current.shopping.map(entry => entry.id === item.id ? { ...entry, unit } : entry) })), onStock: () => stockShoppingItem(item), onAdd: () => openAddFromShopping(item), onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })) : h(Empty, { icon: h(Search, null), title: "Not on the list", text: `No shopping item matches “${shoppingQuery}”.` })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
+                    h("div", { className: "shopping-list" }, state.shopping.length ? (visibleShopping.length ? shoppingGroups.map(group => h("section", { className: "shopping-group", key: group.key },
+                        h("div", { className: "shopping-group-heading" },
+                            h(CategoryGlyph, { category: group.category, size: 15 }),
+                            h("b", null, group.label),
+                            h("small", null, group.items.length, group.items.length === 1 ? " item" : " items")),
+                        group.items.map(item => h(ShoppingRow, { key: item.id, item: item, stockItem: findShoppingStock(item, state.stock), onCheck: () => setState(current => ({ ...current, shopping: current.shopping.map(i => i.id === item.id ? { ...i, checked: !i.checked } : i) })), onAdjust: direction => adjustShopping(item.id, direction), onUnitChange: unit => setState(current => ({ ...current, shopping: current.shopping.map(entry => entry.id === item.id ? { ...entry, unit } : entry) })), onStock: () => stockShoppingItem(item), onAdd: () => openAddFromShopping(item), onDelete: () => setState(current => ({ ...current, shopping: current.shopping.filter(i => i.id !== item.id) })) })))) : h(Empty, { icon: h(Search, null), title: "Not on the list", text: `No shopping item matches “${shoppingQuery}”.` })) : h(Empty, { icon: h(ShoppingBasket, null), title: "Basket's empty", text: "Your smart picks will get better as you use the app." })),
                     h("aside", { className: "smart-panel" },
                         h("span", { className: "eyebrow" },
                             h(Lightbulb, null),
